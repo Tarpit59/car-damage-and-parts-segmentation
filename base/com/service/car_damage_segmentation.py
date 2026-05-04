@@ -310,4 +310,24 @@ def get_car_damage_detections(image_path, coords):
     return detections, labels
 
 
-
+def draw_damage_on_canvas(
+    canvas, image_path, coords,
+    show_damage=True, damage_filled=True,
+    damage_labels=True, mask_alpha=0.35,
+):
+    if not show_damage:
+        return canvas
+    result = get_car_damage_detections(image_path, coords)
+    if result is None:
+        return canvas
+    detections, labels = result
+    if detections.mask is None:
+        return canvas
+    for mask, cid in zip(detections.mask, detections.class_id):
+        color  = DAMAGE_COLORS_BGR[cid % len(DAMAGE_COLORS_BGR)]
+        canvas = draw_curved_mask(canvas, mask, color, alpha=mask_alpha, filled=damage_filled)
+    if damage_labels:
+        for mask, label, cid in zip(detections.mask, labels, detections.class_id):
+            color = DAMAGE_COLORS_BGR[cid % len(DAMAGE_COLORS_BGR)]
+            draw_label_on_image(canvas, label, mask, color)
+    return canvas
