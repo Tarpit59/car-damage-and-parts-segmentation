@@ -78,3 +78,14 @@ def store_annotations_to_json(image_path, width, height, annotations):
 
     return coco
 
+
+def save_coco_to_disk(image_path, coco_data):
+    base_dir      = os.path.dirname(image_path)
+    processed_dir = os.path.join(base_dir, "Processed", "JSON")
+    os.makedirs(processed_dir, exist_ok=True)
+    stem           = os.path.splitext(os.path.basename(image_path))[0]
+    json_path      = os.path.join(processed_dir, f"{stem}.json")
+    with open(json_path, "w") as f:
+        json.dump(coco_data, f, indent=4)
+    print(f"[coco] Saved → {json_path}")
+    return json_path
