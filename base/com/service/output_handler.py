@@ -79,3 +79,101 @@ def _draw_damage_from_detections(canvas, detections, labels,
             draw_label_on_image(canvas, label, mask, color)
     return canvas
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public API
+# ──────────────────────────────────────────────────────────────────────────────
+def process_image(
+    image_path,
+    padding_ratio=PADDING_RATIO,
+    show_parts=True,
+    parts_filled=True,
+    parts_labels=True,
+    show_damage=True,
+    damage_filled=True,
+    damage_labels=True,
+    mask_alpha=0.25,
+    save_coco=SAVE_COCO_DEFAULT,
+    return_coco=False,
+    override_side=None,
+):
+    empty = dict(
+        success=False, coords=None, image_array=None,
+        annotated_image=None, coco_data=None, coco_path=None,
+        analytics=None, det_parts=None, det_damage=None,
+        labels_parts=None, labels_damage=None,
+        parts_warning="",
+    )
+
+    success, result = analyze_single_car_image(image_path, padding_ratio=padding_ratio)
+    if not success:
+        return empty
+
+    coords   = result["coords"]
+    original = cv2.imread(image_path)
+    if original is None:
+        return empty
+
+    img_h, img_w = original.shape[:2]
+    canvas       = original.copy()
+    all_annotations = []
+    det_parts = det_damage = None
+    labels_parts = labels_damage = []
+    parts_warning = ""
+
+    # ── Parts  (ALWAYS run inference; show_parts only controls drawing)
+    parts_result = get_car_parts_detections(image_path, coords, override_side=override_side)
+    if parts_result is not None:
+        det_parts, labels_parts, _, parts_warning = parts_result
+        if det_parts.mask is not None:
+            all_annotations += _build_annotations(det_parts, PARTS_CLASSES, det_parts.mask)
+        if show_parts:
+            canvas, _warn = draw_parts_on_canvas(
+                canvas, image_path, coords,
+                show_parts=True, parts_filled=parts_filled,
+                parts_labels=parts_labels, mask_alpha=mask_alpha,
+                override_side=override_side,
+            )
+
+    # ── Damage  (ALWAYS run inference; show_damage only controls drawing)
+    damage_result = get_car_damage_detections(image_path, coords)
+    if damage_result is not None:
+        det_damage, labels_damage = damage_result
+        det_damage, labels_damage = filter_false_damage_predictions(
+            det_damage, labels_damage, det_parts,
+        )
+        if det_damage is not None and len(det_damage) > 0 and det_damage.mask is not None:
+            all_annotations += _build_annotations(det_damage, DAMAGE_CLASSES, det_damage.mask)
+        if show_damage:
+            canvas = _draw_damage_from_detections(
+                canvas, det_damage, labels_damage,
+                damage_filled=damage_filled, damage_labels=damage_labels,
+                mask_alpha=mask_alpha,
+            )
+
+    # ── Analytics
+    analytics = generate_damage_report(
+        det_damage, det_parts, DAMAGE_CLASSES, PARTS_CLASSES,
+    )
+
+    # ── COCO
+    coco_data = coco_path = None
+    if (save_coco or return_coco) and all_annotations:
+        coco_data_result = store_annotations_to_json(
+            image_path, img_w, img_h, all_annotations,
+        )
+        if save_coco:
+            coco_path = save_coco_to_disk(image_path, coco_data_result)
+        if return_coco:
+            coco_data = coco_data_result
+
+    return dict(
+        success=True, coords=coords,
+        image_array=original, annotated_image=canvas,
+        coco_data=coco_data, coco_path=coco_path,
+        analytics=analytics,
+        det_parts=det_parts, det_damage=det_damage,
+        labels_parts=labels_parts, labels_damage=labels_damage,
+        parts_warning=parts_warning,
+    )
+
