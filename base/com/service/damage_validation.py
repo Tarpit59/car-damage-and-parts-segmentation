@@ -186,3 +186,25 @@ _VALIDATORS = {
 }
 
 
+
+
+
+# ── Internal subset helper ────────────────────────────────────────────────────
+
+def _subset_detections(detections, indices):
+    import supervision as sv
+    if not indices:
+        return sv.Detections(
+            xyxy=np.zeros((0, 4), dtype=np.float32),
+            confidence=np.zeros((0,), dtype=np.float32),
+            class_id=np.zeros((0,), dtype=np.int32),
+            mask=np.zeros((0, *detections.mask.shape[1:]), dtype=bool)
+                 if detections.mask is not None else None,
+        )
+    idx = np.array(indices, dtype=int)
+    return sv.Detections(
+        xyxy=detections.xyxy[idx],
+        confidence=detections.confidence[idx],
+        class_id=detections.class_id[idx],
+        mask=detections.mask[idx] if detections.mask is not None else None,
+    )
