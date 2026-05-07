@@ -186,7 +186,36 @@ _VALIDATORS = {
 }
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
 
+def filter_false_damage_predictions(damage_detections, damage_labels, parts_detections):
+    if damage_detections is None or len(damage_detections) == 0:
+        return damage_detections, damage_labels
+
+    keep = []
+    for i, (mask, cid, conf) in enumerate(zip(
+        damage_detections.mask, damage_detections.class_id, damage_detections.confidence
+    )):
+        validator = _VALIDATORS.get(int(cid))
+        if validator is None:
+            # No special rule → apply only the generic unknown-region check
+            if _is_mostly_unknown(mask, parts_detections):
+                print(f"[damage_validation] REMOVED '{DAMAGE_CLASS_NAMES[int(cid)]}' "
+                      f"conf={conf:.2f} — mostly unknown region")
+            else:
+                keep.append(i)
+            continue
+
+        overlapping_parts = _which_parts_overlap(mask, parts_detections)
+        if validator(mask, overlapping_parts, parts_detections):
+            keep.append(i)
+        else:
+            print(f"[damage_validation] REMOVED '{DAMAGE_CLASS_NAMES[int(cid)]}' "
+                  f"conf={conf:.2f} — overlapping={overlapping_parts}")
+
+    if not keep:
+        return _subset_detections(damage_detections, []), []
+    return _subset_detections(damage_detections, keep), [damage_labels[i] for i in keep]
 
 
 # ── Internal subset helper ────────────────────────────────────────────────────
