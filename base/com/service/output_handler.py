@@ -177,3 +177,42 @@ def process_image(
         parts_warning=parts_warning,
     )
 
+
+def render_on_demand(
+    image_path,
+    coords,
+    det_parts,
+    labels_parts,
+    det_damage,
+    labels_damage,
+    show_parts=True,
+    parts_filled=True,
+    parts_labels=True,
+    show_damage=True,
+    damage_filled=True,
+    damage_labels=True,
+    mask_alpha=0.35,
+):
+
+    original = cv2.imread(image_path)
+    if original is None:
+        return None
+    canvas = original.copy()
+
+    if show_parts and det_parts is not None and det_parts.mask is not None:
+        for mask, cid in zip(det_parts.mask, det_parts.class_id):
+            color  = PART_COLORS_BGR[int(cid) % len(PART_COLORS_BGR)]
+            canvas = draw_curved_mask(canvas, mask, color, alpha=mask_alpha, filled=parts_filled)
+        if parts_labels:
+            for mask, label, cid in zip(det_parts.mask, labels_parts, det_parts.class_id):
+                color = PART_COLORS_BGR[int(cid) % len(PART_COLORS_BGR)]
+                draw_label_on_image(canvas, label, mask, color)
+
+    if show_damage:
+        canvas = _draw_damage_from_detections(
+            canvas, det_damage, labels_damage,
+            damage_filled=damage_filled, damage_labels=damage_labels,
+            mask_alpha=mask_alpha,
+        )
+
+    return canvas
