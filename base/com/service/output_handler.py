@@ -193,7 +193,10 @@ def render_on_demand(
     damage_labels=True,
     mask_alpha=0.35,
 ):
-
+    """
+    Re-render canvas with user-chosen toggles WITHOUT re-running inference.
+    Called by the controller when the frontend adjusts visibility/opacity.
+    """
     original = cv2.imread(image_path)
     if original is None:
         return None
