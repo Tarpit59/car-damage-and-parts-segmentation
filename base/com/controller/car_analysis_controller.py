@@ -140,3 +140,112 @@ def index():
     return render_template("car_analysis/index.html")
 
 
+@bp.route("/upload", methods=["POST"])
+def upload():
+    """
+    Receives image upload, runs full pipeline, returns:
+      - original image (base64)
+      - annotated image (base64)
+      - detections metadata (for legend)
+      - analytics JSON
+    """
+    if "image" not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+
+    file = request.files["image"]
+    if file.filename == "" or not _allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type"}), 400
+
+    upload_dir = current_app.config["UPLOAD_FOLDER"]
+    os.makedirs(upload_dir, exist_ok=True)
+    filename   = secure_filename(file.filename)
+    image_path = os.path.join(upload_dir, filename)
+    file.save(image_path)
+
+    # ── Auto-resize: prevent CUDA OOM for high-res images (e.g. 4608×3072) ──
+    _auto_resize_image(image_path)
+
+    # ── Resolve car side: filename takes priority, dropdown is fallback ───────
+    override_side = (request.form.get("car_side") or "").strip() or None
+    # Validate the override value against accepted sides
+    _valid_sides = {
+        "front", "rear", "left", "right",
+        "front_left", "front_right", "rear_left", "rear_right",
+    }
+    if override_side and override_side not in _valid_sides:
+        override_side = None
+
+    # After resolving, hard-stop if no side is determinable at all
+    resolved = get_car_side(image_path, override_side=override_side)
+    if resolved is None:
+        return jsonify({
+            "error": (
+                "Car side could not be determined. "
+                "Please rename the image with a side prefix "
+                "(e.g. front_, rear_, left_, right_, front_left_, front_right_, "
+                "rear_left_, rear_right_) "
+                "or select the car side from the dropdown before uploading."
+            ),
+            "side_required": True,
+        }), 422
+
+    # ── Read toggle states sent by the frontend ────────────────────────────
+    def _bool(key, default=True):
+        v = request.form.get(key)
+        if v is None:
+            return default
+        return v.strip() not in ("0", "false", "no", "")
+
+    show_parts    = _bool("show_parts",    True)
+    parts_filled  = _bool("parts_filled",  True)
+    parts_labels  = _bool("parts_labels",  True)
+    show_damage   = _bool("show_damage",   True)
+    damage_filled = _bool("damage_filled", True)
+    damage_labels = _bool("damage_labels", True)
+    try:
+        mask_alpha = float(request.form.get("mask_alpha", 0.35))
+    except (TypeError, ValueError):
+        mask_alpha = 0.35
+
+    result = process_image(
+        image_path=image_path,
+        show_parts=show_parts,
+        parts_filled=parts_filled,
+        parts_labels=parts_labels,
+        show_damage=show_damage,
+        damage_filled=damage_filled,
+        damage_labels=damage_labels,
+        mask_alpha=mask_alpha,
+        save_coco=current_app.config.get("SAVE_COCO_DEFAULT", False),
+        return_coco=False,
+        override_side=override_side,
+    )
+
+    if not result["success"]:
+        return jsonify({"error": "No car detected in the image"}), 422
+
+    # Store detections in session for re-render
+    _store_detections(
+        "det_session",
+        result["det_parts"], result["det_damage"],
+        result["labels_parts"], result["labels_damage"],
+        image_path, result["coords"],
+    )
+
+    return jsonify(_sanitize({
+        "success":          True,
+        "original_image":   _bgr_to_b64(result["image_array"]),
+        "annotated_image":  _bgr_to_b64(result["annotated_image"]),
+        "coords":           result["coords"],
+        "parts_warning":    result.get("parts_warning", ""),
+        "parts_detections": _detections_to_json(
+            result["det_parts"], result["labels_parts"],
+            PARTS_CLASSES, PART_COLORS_HEX,
+        ),
+        "damage_detections": _detections_to_json(
+            result["det_damage"], result["labels_damage"],
+            DAMAGE_CLASSES, DAMAGE_COLORS_HEX,
+        ),
+        "analytics":        result["analytics"],
+    }))
+
