@@ -249,3 +249,39 @@ def upload():
         "analytics":        result["analytics"],
     }))
 
+
+@bp.route("/render", methods=["POST"])
+def render():
+    """
+    Re-render the stored detections with new toggle/opacity settings.
+    No model inference is run — pure drawing pass.
+    """
+    payload = _load_detections("det_session")
+    if payload is None:
+        return jsonify({"error": "No active session. Please upload an image first."}), 400
+
+    data = request.get_json(force=True)
+
+    canvas = render_on_demand(
+        image_path    = payload["image_path"],
+        coords        = payload["coords"],
+        det_parts     = payload["det_parts"],
+        labels_parts  = payload["labels_parts"],
+        det_damage    = payload["det_damage"],
+        labels_damage = payload["labels_damage"],
+        show_parts    = data.get("show_parts",    True),
+        parts_filled  = data.get("parts_filled",  True),
+        parts_labels  = data.get("parts_labels",  True),
+        show_damage   = data.get("show_damage",   True),
+        damage_filled = data.get("damage_filled", True),
+        damage_labels = data.get("damage_labels", True),
+        mask_alpha    = float(data.get("mask_alpha", 0.35)),
+    )
+
+    if canvas is None:
+        return jsonify({"error": "Render failed"}), 500
+
+    return jsonify({
+        "success":         True,
+        "annotated_image": _bgr_to_b64(canvas),
+    })
