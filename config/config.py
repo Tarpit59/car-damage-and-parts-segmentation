@@ -29,11 +29,11 @@ MAX_INPUT_RESOLUTION = 1920
 # ──────────────────────────────────────────────────────────────────────────────
 YOLO_CHECKPOINT = r"path\to\yolov8m.pt"
 
-PARTS_CHECKPOINT = r"path\to\checkpoint_best_total.pth"
+PARTS_CHECKPOINT = r"path\to\checkpoint_parts.pth"
 PARTS_RESOLUTION = 960
 PARTS_THRESHOLD  = 0.45
 
-DAMAGE_CHECKPOINT  = r"path\to\checkpoint_best_total.pth"
+DAMAGE_CHECKPOINT  = r"path\to\checkpoint_damage.pth"
 DAMAGE_RESOLUTION  = 960
 DAMAGE_THRESHOLD   = 0.40
 TILE_THRESHOLD     = 0.55
