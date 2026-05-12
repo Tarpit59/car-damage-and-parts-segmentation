@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AutoScan AI — Car Damage Analyser</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   DESIGN SYSTEM  –  Dark industrial / precision-instrument aesthetic
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #0a0a0f;
+  --bg2:       #111118;
+  --bg3:       #18181f;
+  --border:    #2a2a38;
+  --border2:   #3a3a50;
+  --accent:    #e8ff5a;       /* electric lime — the ONE pop */
+  --accent2:   #5af0ff;       /* cyan hint */
+  --text:      #e4e4f0;
+  --text2:     #8888a8;
+  --text3:     #55556a;
+  --danger:    #ff4d6d;
+  --warn:      #ffb347;
+  --ok:        #4dff91;
+  --radius:    6px;
+  --mono:      "Space Mono", monospace;
+  --sans:      "Syne", sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── GRID NOISE TEXTURE ── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px);
+  opacity: 0.07;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ══════════════════════════════════════════════════════════
+   HEADER
+   ══════════════════════════════════════════════════════════ */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(10,10,15,0.92);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.header-tag {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAIN LAYOUT
+   ══════════════════════════════════════════════════════════ */
+main {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 0;
+  height: calc(100vh - 60px);
+}
+
+/* ── LEFT PANEL ── */
+.panel-left {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg2);
+}
+
+.panel-section {
+  border-bottom: 1px solid var(--border);
+  padding: 1.2rem 1.4rem;
+}
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── UPLOAD ZONE ── */
+.upload-zone {
+  border: 2px dashed var(--border2);
+  border-radius: var(--radius);
+  padding: 2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--accent);
+  background: rgba(232,255,90,0.04);
+}
+.upload-zone input[type=file] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.upload-icon {
+  font-size: 2.2rem;
+  margin-bottom: 0.6rem;
+  display: block;
+}
+.upload-zone p {
+  font-size: 0.82rem;
+  color: var(--text2);
+  line-height: 1.5;
+}
+.upload-zone strong { color: var(--accent); font-weight: 600; }
+
+/* ── CONTROLS ── */
+.control-group { margin-bottom: 0.9rem; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+}
+.toggle-label {
+  font-size: 0.82rem;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toggle-label .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Custom toggle switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.slider::before {
+  content: "";
+  position: absolute;
+  height: 12px; width: 12px;
+  left: 3px; bottom: 3px;
+  background: var(--text3);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+input:checked + .slider { background: rgba(232,255,90,0.15); border-color: var(--accent); }
+input:checked + .slider::before { transform: translateX(18px); background: var(--accent); }
+
+/* Opacity slider */
+.opacity-slider-wrap { margin-top: 0.5rem; }
+.opacity-slider-wrap label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-bottom: 0.4rem;
+}
+.opacity-slider-wrap label span {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+input[type=range] {
+  width: 100%;
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border2);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* ── LEGEND ── */
+.legend-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  color: var(--text2);
+  transition: background 0.15s;
+}
+.legend-item:hover { background: var(--bg3); }
+.legend-swatch {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.legend-conf {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text3);
+}
+.legend-empty {
+  font-size: 0.78rem;
+  color: var(--text3);
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+/* ── ANALYSE BUTTON ── */
+.btn-analyse {
+  width: 100%;
+  padding: 0.85rem;
+  background: var(--accent);
+  color: #0a0a0f;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  text-transform: uppercase;
+  margin-top: 0.5rem;
+}
+.btn-analyse:hover { opacity: 0.88; transform: translateY(-1px); }
+.btn-analyse:active { transform: translateY(0); }
+.btn-analyse:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ── RIGHT PANEL ── */
+.panel-right {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── IMAGE VIEWER ── */
+.image-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-placeholder {
+  text-align: center;
+  color: var(--text3);
+}
+.image-placeholder .big-icon { font-size: 4rem; margin-bottom: 1rem; }
+.image-placeholder h2 { font-size: 1.1rem; color: var(--text2); font-weight: 600; }
+.image-placeholder p { font-size: 0.82rem; margin-top: 0.4rem; }
+
+#result-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius);
+  display: none;
+  transition: opacity 0.3s;
+}
+
+/* ── LOADER ── */
+.loader-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10,10,15,0.88);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  z-index: 10;
+  backdrop-filter: blur(6px);
+}
+.loader-overlay.active { display: flex; }
+.spinner {
+  width: 48px; height: 48px;
+  border: 3px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--text2);
+  letter-spacing: 0.08em;
+}
+
+/* ── ANALYTICS BAR ── */
+.analytics-bar {
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 1rem 1.5rem;
+  display: none;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.analytics-bar.active { display: flex; }
+
+.analytics-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.health-block {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.health-score-ring {
+  position: relative;
+  width: 60px; height: 60px;
+}
+.health-score-ring svg { transform: rotate(-90deg); }
+.ring-bg   { fill: none; stroke: var(--border2); stroke-width: 6; }
+.ring-fill { fill: none; stroke-width: 6; stroke-linecap: round;
+             transition: stroke-dashoffset 0.8s cubic-bezier(.4,0,.2,1); }
+.ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.health-meta { font-size: 0.82rem; }
+.health-meta .score-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  color: var(--text3);
+  text-transform: uppercase;
+}
+.health-meta .score-summary { color: var(--text2); margin-top: 2px; }
+
+.damage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  border: 1px solid;
+  white-space: nowrap;
+}
+.chip-Minor    { color: var(--ok);    border-color: rgba(77,255,145,.35); background: rgba(77,255,145,.07); }
+.chip-Moderate { color: var(--warn);  border-color: rgba(255,179,71,.35); background: rgba(255,179,71,.07); }
+.chip-Major    { color: #ff9f1c;      border-color: rgba(255,159,28,.35); background: rgba(255,159,28,.07); }
+.chip-Critical { color: var(--danger);border-color: rgba(255,77,109,.35); background: rgba(255,77,109,.07); }
+
+/* Scrollable damage table */
+.damage-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.damage-table-wrap.active { display: block; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+th {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 8px 12px;
+  text-align: left;
+  background: var(--bg3);
+  position: sticky;
+  top: 0;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+  vertical-align: middle;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg3); }
+
+.sev-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.sev-Minor    { background: rgba(77,255,145,.12);  color: var(--ok); }
+.sev-Moderate { background: rgba(255,179,71,.12);  color: var(--warn); }
+.sev-Major    { background: rgba(255,159,28,.12);  color: #ff9f1c; }
+.sev-Critical { background: rgba(255,77,109,.12);  color: var(--danger); }
+
+.conf-bar-wrap { width: 60px; height: 4px; background: var(--border2); border-radius: 2px; }
+.conf-bar { height: 100%; border-radius: 2px; background: var(--accent2); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  padding: 0.85rem 1.3rem;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  font-size: 0.82rem;
+  color: var(--text);
+  z-index: 200;
+  transform: translateY(120%);
+  transition: transform 0.3s;
+  max-width: 320px;
+  font-family: var(--mono);
+}
+.toast.show  { transform: translateY(0); }
+.toast.error { border-color: var(--danger); color: var(--danger); }
+.toast.ok    { border-color: var(--ok); color: var(--ok); }
+.toast.warn  { border-color: var(--warn); color: var(--warn); }
+
+/* ── CAR SIDE SELECTOR ── */
+.side-select-wrap {
+  margin-top: 0.85rem;
+}
+.side-select-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 0.45rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.side-select-label::before {
+  content: "⬡";
+  color: var(--accent2);
+  font-size: 0.75rem;
+}
+.side-select {
+  width: 100%;
+  padding: 0.52rem 0.75rem;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238888a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  padding-right: 2rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.side-select:focus {
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 2px rgba(90,240,255,0.12);
+}
+.side-select option {
+  background: var(--bg3);
+  color: var(--text);
+}
+
+/* Side status pill */
+.side-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 0.45rem;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  border: 1px solid transparent;
+  transition: all 0.25s;
+}
+.side-status.detected {
+  background: rgba(77,255,145,0.08);
+  border-color: rgba(77,255,145,0.3);
+  color: var(--ok);
+}
+.side-status.manual {
+  background: rgba(90,240,255,0.08);
+  border-color: rgba(90,240,255,0.3);
+  color: var(--accent2);
+}
+.side-status.none {
+  background: rgba(255,179,71,0.08);
+  border-color: rgba(255,179,71,0.3);
+  color: var(--warn);
+}
+.side-status .s-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+/* ── SECTION HEADER TOGGLE ── */
+.section-collapse { cursor: pointer; user-select: none; }
+.section-collapse .chevron { margin-left: auto; transition: transform 0.2s; font-size: 0.7rem; }
+.section-collapse.closed .chevron { transform: rotate(-90deg); }
+.collapsible { overflow: hidden; transition: max-height 0.3s; }
+
+/* ── VISIBILITY PANEL: hidden until analysis runs ── */
+#vis-section { display: none; }
+#vis-section.revealed { display: block; }
+</style>
+</head>
+
+<body>
+<!-- ════════════════════ HEADER ════════════════════ -->
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    AUTOSCAN_AI
+  </div>
+  <span class="header-tag">Car Damage Intelligence System</span>
+</header>
+
+<!-- ════════════════════ MAIN ════════════════════ -->
+<main>
+
+  <!-- ══ LEFT PANEL ══ -->
+  <aside class="panel-left">
+
+    <!-- Upload -->
+    <div class="panel-section">
+      <div class="section-label">01 // INPUT</div>
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="file-input" accept="image/*" />
+        <span class="upload-icon">⬆</span>
+        <p><strong>Drop image here</strong><br/>or click to browse<br/><span style="font-size:0.7rem;color:var(--text3)">JPG · PNG · WEBP · max 20 MB</span></p>
+      </div>
+      <div id="file-name" style="margin-top:0.6rem;font-size:0.72rem;color:var(--text3);font-family:var(--mono);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;"></div>
+
+      <!-- Car Side Selector -->
+      <div class="side-select-wrap">
+        <div class="side-select-label">Car Side / View</div>
+        <select class="side-select" id="car-side-select">
+          <option value="">— Auto-detect from filename —</option>
+          <option value="front">Front</option>
+          <option value="rear">Rear</option>
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+          <option value="front_left">Front Left</option>
+          <option value="front_right">Front Right</option>
+          <option value="rear_left">Rear Left</option>
+          <option value="rear_right">Rear Right</option>
+        </select>
+        <div class="side-status none" id="side-status">
+          <span class="s-dot" style="background:var(--warn)"></span>
+          No image loaded
+        </div>
+      </div>
+
+      <button class="btn-analyse" id="btn-analyse" disabled>⚡ ANALYSE</button>
+    </div>
+
+    <!-- Visibility toggles -->
+    <div class="panel-section" id="vis-section">
+      <div class="section-label section-collapse" id="toggle-vis-header">
+        02 // VISIBILITY <span class="chevron">▾</span>
+      </div>
+      <div class="collapsible" id="toggle-vis-body">
+
+        <div class="control-group" style="margin-bottom:0.5rem">
+          <div style="font-family:var(--mono);font-size:0.68rem;color:var(--accent);letter-spacing:0.1em;margin-bottom:0.5rem">PARTS</div>
+
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#48F90A"></span>Show Parts</span>
+            <label class="switch"><input type="checkbox" id="tog-show-parts" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#92CC17"></span>Filled Masks</span>
+            <label class="switch"><input type="checkbox" id="tog-parts-filled" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#3DDB86"></span>Part Labels</span>
+            <label class="switch"><input type="checkbox" id="tog-parts-labels" checked /><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div style="font-family:var(--mono);font-size:0.68rem;color:var(--accent2);letter-spacing:0.1em;margin-bottom:0.5rem">DAMAGE</div>
+
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#FF4D6D"></span>Show Damage</span>
+            <label class="switch"><input type="checkbox" id="tog-show-damage" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#FF9F1C"></span>Filled Masks</span>
+            <label class="switch"><input type="checkbox" id="tog-damage-filled" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label"><span class="dot" style="background:#FFB21D"></span>Damage Labels</span>
+            <label class="switch"><input type="checkbox" id="tog-damage-labels" checked /><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <div class="opacity-slider-wrap">
+          <label>Mask Opacity <span id="opacity-val">35%</span></label>
+          <input type="range" id="opacity-slider" min="5" max="90" value="35" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Parts legend -->
+    <div class="panel-section">
+      <div class="section-label">03 // PARTS DETECTED</div>
+      <div class="legend-list" id="parts-legend">
+        <div class="legend-empty">Upload an image to start.</div>
+      </div>
+    </div>
+
+    <!-- Damage legend -->
+    <div class="panel-section">
+      <div class="section-label">04 // DAMAGE DETECTED</div>
+      <div class="legend-list" id="damage-legend">
+        <div class="legend-empty">Upload an image to start.</div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ══ RIGHT PANEL ══ -->
+  <section class="panel-right">
+
+    <!-- Image area -->
+    <div class="image-area" id="image-area">
+      <div class="image-placeholder" id="img-placeholder">
+        <div class="big-icon">🚗</div>
+        <h2>No image loaded</h2>
+        <p>Upload a car photo on the left to begin analysis.</p>
+      </div>
+      <img id="result-img" alt="Analysis result" />
+      <div class="loader-overlay" id="loader">
+        <div class="spinner"></div>
+        <div class="loader-text" id="loader-text">RUNNING INFERENCE…</div>
+      </div>
+    </div>
+
+    <!-- Analytics bar -->
+    <div class="analytics-bar" id="analytics-bar">
+      <div class="analytics-top">
+        <div class="health-block">
+          <div class="health-score-ring">
+            <svg width="60" height="60" viewBox="0 0 60 60">
+              <circle class="ring-bg"   cx="30" cy="30" r="24"/>
+              <circle class="ring-fill" cx="30" cy="30" r="24" id="ring-fill"
+                stroke-dasharray="150.8" stroke-dashoffset="150.8" stroke="var(--ok)"/>
+            </svg>
+            <div class="ring-text" id="ring-score">—</div>
+          </div>
+          <div class="health-meta">
+            <div class="score-label">Health Score</div>
+            <div class="score-summary" id="score-summary">Run analysis first</div>
+          </div>
+        </div>
+        <div class="damage-chips" id="damage-chips"></div>
+      </div>
+      <div class="damage-table-wrap" id="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Part</th>
+              <th>Damage</th>
+              <th>Severity</th>
+              <th>Area %</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="damage-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<!-- ── TOAST ── -->
+<div class="toast" id="toast"></div>
+
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════ */
+const state = {
+  file: null,
+  analysed: false,
+  rendering: false,
+  renderTimer: null,
+};
+
+/* ══════════════════════════════════════════════════════════
+   DOM REFS
+   ══════════════════════════════════════════════════════════ */
+const $  = id => document.getElementById(id);
+const uploadZone   = $("upload-zone");
+const fileInput    = $("file-input");
+const fileNameEl   = $("file-name");
+const btnAnalyse   = $("btn-analyse");
+const loader       = $("loader");
+const loaderText   = $("loader-text");
+const resultImg    = $("result-img");
+const placeholder  = $("img-placeholder");
+const analyticsBar = $("analytics-bar");
+const partsLegend  = $("parts-legend");
+const damageLegend = $("damage-legend");
+const opacitySlider= $("opacity-slider");
+const opacityVal   = $("opacity-val");
+const toast        = $("toast");
+const carSideSelect = $("car-side-select");
+const sideStatus    = $("side-status");
+
+/* Valid side prefixes (longest first so front_left beats front) */
+const VALID_SIDES = [
+  "front_left", "front_right", "rear_left", "rear_right",
+  "front", "rear", "left", "right",
+];
+
+function detectSideFromFilename(filename) {
+  const lower = filename.toLowerCase();
+  for (const s of VALID_SIDES) {
+    if (lower.startsWith(s)) return s;
+  }
+  return null;
+}
+
+function updateSideStatus() {
+  const filename  = state.file ? state.file.name : null;
+  const fromName  = filename ? detectSideFromFilename(filename) : null;
+  const fromDrop  = carSideSelect.value || null;
+
+  if (fromName) {
+    sideStatus.className = "side-status detected";
+    sideStatus.innerHTML = `<span class="s-dot" style="background:var(--ok)"></span>Auto-detected: <strong style="color:var(--ok)">${fromName.replace(/_/g,' ')}</strong>`;
+  } else if (fromDrop) {
+    sideStatus.className = "side-status manual";
+    sideStatus.innerHTML = `<span class="s-dot" style="background:var(--accent2)"></span>Manual: <strong style="color:var(--accent2)">${fromDrop.replace(/_/g,' ')}</strong>`;
+  } else {
+    sideStatus.className = "side-status none";
+    sideStatus.innerHTML = `<span class="s-dot" style="background:var(--warn)"></span><span style="color:var(--warn)">⛔ Side not defined — analysis will be blocked</span>`;
+  }
+}
+
+/* Update pill whenever dropdown changes */
+carSideSelect.addEventListener("change", updateSideStatus);
+
+/* toggles */
+const toggles = {
+  showParts:    $("tog-show-parts"),
+  partsFilled:  $("tog-parts-filled"),
+  partsLabels:  $("tog-parts-labels"),
+  showDamage:   $("tog-show-damage"),
+  damageFilled: $("tog-damage-filled"),
+  damageLabels: $("tog-damage-labels"),
+};
+
+/* ══════════════════════════════════════════════════════════
+   TOAST
+   ══════════════════════════════════════════════════════════ */
+let toastTimer;
+function showToast(msg, type="") {
+  clearTimeout(toastTimer);
+  toast.textContent = msg;
+  toast.className = `toast ${type} show`;
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 3500);
+}
+
+/* ══════════════════════════════════════════════════════════
+   COLLAPSIBLE SECTION
+   ══════════════════════════════════════════════════════════ */
+document.querySelectorAll(".section-collapse").forEach(header => {
+  const bodyId = header.id.replace("header","body");
+  const body   = document.getElementById(bodyId);
+  if (!body) return;
+  header.addEventListener("click", () => {
+    const open = !header.classList.contains("closed");
+    header.classList.toggle("closed", open);
+    body.style.maxHeight = open ? "0" : "9999px";
+  });
+  body.style.maxHeight = "9999px";
+});
+
+/* ══════════════════════════════════════════════════════════
+   FILE UPLOAD
+   ══════════════════════════════════════════════════════════ */
+uploadZone.addEventListener("dragover", e => {
+  e.preventDefault();
+  uploadZone.classList.add("dragover");
+});
+uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
+uploadZone.addEventListener("drop", e => {
+  e.preventDefault();
+  uploadZone.classList.remove("dragover");
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+function clearAnalysis() {
+  /* Reset all analysis data shown on screen for the previous image */
+  state.analysed = false;
+  analyticsBar.classList.remove("active");
+  $("vis-section").classList.remove("revealed");  /* hide toggles until next analysis */
+  partsLegend.innerHTML  = '<div class="legend-empty">Upload an image to start.</div>';
+  damageLegend.innerHTML = '<div class="legend-empty">Upload an image to start.</div>';
+  $("damage-chips").innerHTML = "";
+  $("damage-tbody").innerHTML = "";
+  $("table-wrap").classList.remove("active");
+  $("ring-score").textContent    = "—";
+  $("ring-score").style.color    = "";
+  $("ring-fill").style.strokeDashoffset = "150.8";
+  $("ring-fill").style.stroke           = "var(--ok)";
+  $("score-summary").textContent = "Run analysis first";
+  clearTimeout(state.renderTimer);
+}
+
+function handleFile(f) {
+  /* Clear any previous analysis before showing new image */
+  clearAnalysis();
+
+  state.file = f;
+  fileNameEl.textContent = f.name;
+  btnAnalyse.disabled = false;
+
+  /* Auto-detect side from filename and update UI */
+  const detected = detectSideFromFilename(f.name);
+  if (detected) {
+    /* If filename has a side, reset dropdown to auto so status shows "detected" */
+    carSideSelect.value = "";
+  }
+  updateSideStatus();
+
+  /* Preview original */
+  const reader = new FileReader();
+  reader.onload = ev => {
+    resultImg.src = ev.target.result;
+    resultImg.style.display = "block";
+    placeholder.style.display = "none";
+  };
+  reader.readAsDataURL(f);
+}
+
+/* ══════════════════════════════════════════════════════════
+   ANALYSE
+   ══════════════════════════════════════════════════════════ */
+btnAnalyse.addEventListener("click", async () => {
+  if (!state.file) return;
+
+  const fd = new FormData();
+  fd.append("image", state.file);
+
+  /* Determine side: filename first, then dropdown fallback */
+  const detectedSide = detectSideFromFilename(state.file.name);
+  const manualSide   = carSideSelect.value || "";
+  const resolvedSide = detectedSide || manualSide;
+
+  /* ── Guard: block analysis if no side is defined ──────────────────── */
+  if (!resolvedSide) {
+    showToast(
+      "⛔ Car side is not defined. Please select a side from the dropdown or rename the image with a prefix (e.g. front_, rear_, left_, right_).",
+      "error"
+    );
+    return;   // do NOT proceed — no network call, no processing
+  }
+
+  fd.append("car_side", resolvedSide);   /* backend uses this to resolve side */
+
+  /* Send current toggle states so backend renders with correct visibility */
+  fd.append("show_parts",    toggles.showParts.checked    ? "1" : "0");
+  fd.append("parts_filled",  toggles.partsFilled.checked  ? "1" : "0");
+  fd.append("parts_labels",  toggles.partsLabels.checked  ? "1" : "0");
+  fd.append("show_damage",   toggles.showDamage.checked   ? "1" : "0");
+  fd.append("damage_filled", toggles.damageFilled.checked ? "1" : "0");
+  fd.append("damage_labels", toggles.damageLabels.checked ? "1" : "0");
+  fd.append("mask_alpha",    (parseFloat(opacitySlider.value) / 100).toFixed(2));
+
+  loader.classList.add("active");
+  loaderText.textContent = "DETECTING CAR…";
+  btnAnalyse.disabled    = true;
+
+  try {
+    const steps = ["DETECTING CAR…", "SEGMENTING PARTS…", "ANALYSING DAMAGE…", "GENERATING REPORT…"];
+    let si = 0;
+    const stepInterval = setInterval(() => {
+      si = (si + 1) % steps.length;
+      loaderText.textContent = steps[si];
+    }, 2200);
+
+    const res  = await fetch("/analysis/upload", { method: "POST", body: fd });
+    clearInterval(stepInterval);
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      showToast(data.error || "Analysis failed", "error");
+      return;
+    }
+
+    state.analysed = true;
+    $("vis-section").classList.add("revealed");  /* show toggles now that results exist */
+
+    /* Update image */
+    resultImg.style.opacity = "0";
+    setTimeout(() => {
+      resultImg.src = "data:image/jpeg;base64," + data.annotated_image;
+      resultImg.style.display = "block";
+      resultImg.style.opacity = "1";
+      placeholder.style.display = "none";
+    }, 150);
+
+    /* Legends */
+    renderLegend(partsLegend,  data.parts_detections,  "No parts detected.");
+    renderLegend(damageLegend, data.damage_detections, "No damage detected.");
+
+    /* Analytics */
+    renderAnalytics(data.analytics);
+
+    /* Parts warning (side not defined) */
+    if (data.parts_warning) {
+      showToast("⚠ " + data.parts_warning, "warn");
+    } else {
+      showToast(`Analysis complete — ${data.analytics.total_damages} damage(s) found.`, "ok");
+    }
+
+  } catch(err) {
+    showToast("Network error: " + err.message, "error");
+  } finally {
+    loader.classList.remove("active");
+    btnAnalyse.disabled = false;
+  }
+});
+
+/* ══════════════════════════════════════════════════════════
+   LEGEND RENDER
+   ══════════════════════════════════════════════════════════ */
+function renderLegend(container, items, emptyMsg) {
+  if (!items || items.length === 0) {
+    container.innerHTML = `<div class="legend-empty">${emptyMsg}</div>`;
+    return;
+  }
+  container.innerHTML = items.map(d => `
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:${d.color}"></div>
+      <span>${d.class_name.replace(/_/g," ")}</span>
+      <span class="legend-conf">${(d.confidence*100).toFixed(0)}%</span>
+    </div>
+  `).join("");
+}
+
+/* ══════════════════════════════════════════════════════════
+   ANALYTICS RENDER
+   ══════════════════════════════════════════════════════════ */
+function renderAnalytics(a) {
+  analyticsBar.classList.add("active");
+
+  /* Health ring */
+  const score   = a.overall_health_score;
+  const circ    = 2 * Math.PI * 24;          // r=24
+  const offset  = circ - (score / 100) * circ;
+  const ringFill= $("ring-fill");
+  const ringColor = score >= 80 ? "var(--ok)" : score >= 50 ? "var(--warn)" : "var(--danger)";
+  ringFill.style.stroke            = ringColor;
+  ringFill.style.strokeDashoffset  = offset;
+  $("ring-score").textContent      = score;
+  $("ring-score").style.color      = ringColor;
+  $("score-summary").textContent   = a.summary;
+
+  /* Severity chips — only for entries where severity is defined */
+  const sevCount = {};
+  a.parts.forEach(p => {
+    if (p.severity != null) sevCount[p.severity] = (sevCount[p.severity]||0)+1;
+  });
+  $("damage-chips").innerHTML = Object.entries(sevCount).map(([sev, n]) =>
+    `<div class="chip chip-${sev}">● ${n} ${sev}</div>`
+  ).join("");
+
+  /* Table */
+  const tbody = $("damage-tbody");
+  const wrap  = $("table-wrap");
+  if (a.parts.length === 0) {
+    wrap.classList.remove("active");
+    tbody.innerHTML = "";
+    return;
+  }
+  wrap.classList.add("active");
+  tbody.innerHTML = a.parts.map(p => {
+    /* Severity and area only meaningful when part mask is defined */
+    const sevCell  = p.severity != null
+      ? `<span class="sev-badge sev-${p.severity}">${p.severity}</span>`
+      : `<span style="color:var(--text3);font-family:var(--mono);font-size:0.7rem">—</span>`;
+    const areaCell = p.damage_percent != null
+      ? `<span style="font-family:var(--mono)">${p.damage_percent}%</span>`
+      : `<span style="color:var(--text3);font-family:var(--mono);font-size:0.7rem">—</span>`;
+    return `<tr>
+      <td>${p.part_name.replace(/_/g," ")}</td>
+      <td>${p.damage_type}</td>
+      <td>${sevCell}</td>
+      <td>${areaCell}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="conf-bar-wrap"><div class="conf-bar" style="width:${(p.confidence*100).toFixed(0)}%"></div></div>
+          <span style="font-family:var(--mono);font-size:0.68rem;color:var(--text3)">${(p.confidence*100).toFixed(0)}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+
+/* Wire toggles + slider */
+Object.values(toggles).forEach(t => t.addEventListener("change", scheduleRender));
+opacitySlider.addEventListener("input", () => {
+  opacityVal.textContent = opacitySlider.value + "%";
+  scheduleRender();
+});
+</script>
+</body>
+</html>
