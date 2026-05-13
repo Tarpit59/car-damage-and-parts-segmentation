@@ -1124,6 +1124,52 @@ function renderAnalytics(a) {
   }).join("");
 }
 
+/* ══════════════════════════════════════════════════════════
+   RE-RENDER (debounced 400ms)
+   ══════════════════════════════════════════════════════════ */
+function scheduleRender() {
+  if (!state.analysed) return;
+  clearTimeout(state.renderTimer);
+  state.renderTimer = setTimeout(doRender, 400);
+}
+
+async function doRender() {
+  if (state.rendering) return;
+  state.rendering = true;
+  loaderText.textContent = "REDRAWING…";
+  loader.classList.add("active");
+
+  const body = {
+    show_parts:    toggles.showParts.checked,
+    parts_filled:  toggles.partsFilled.checked,
+    parts_labels:  toggles.partsLabels.checked,
+    show_damage:   toggles.showDamage.checked,
+    damage_filled: toggles.damageFilled.checked,
+    damage_labels: toggles.damageLabels.checked,
+    mask_alpha:    parseFloat(opacitySlider.value) / 100,
+  };
+
+  try {
+    const res  = await fetch("/analysis/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.success) {
+      resultImg.style.opacity = "0";
+      setTimeout(() => {
+        resultImg.src           = "data:image/jpeg;base64," + data.annotated_image;
+        resultImg.style.opacity = "1";
+      }, 100);
+    }
+  } catch(err) {
+    showToast("Render error: " + err.message, "error");
+  } finally {
+    loader.classList.remove("active");
+    state.rendering = false;
+  }
+}
 
 /* Wire toggles + slider */
 Object.values(toggles).forEach(t => t.addEventListener("change", scheduleRender));
