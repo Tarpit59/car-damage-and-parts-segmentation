@@ -986,3 +986,325 @@ def parse_args():
     return p.parse_args()
 
 
+def main():
+    args = parse_args()
+    plots_dir = Path(args.plots_dir)
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Load annotations ──────────────────────────────────────────────────
+    print(f"\n[INFO] Loading annotations: {args.annotations}")
+    with open(args.annotations) as f:
+        coco = json.load(f)
+
+    images    = {img["id"]: img for img in coco["images"]}
+    anns      = coco["annotations"]
+    coco_cats = {c["id"]: c["name"] for c in coco["categories"]}
+
+    assert len(images) == 374, f"Expected 374 images, got {len(images)}"
+    assert len(anns)   == 785, f"Expected 785 annotations, got {len(anns)}"
+    print(f"[INFO] ✓ 374 images, 785 annotations")
+
+    # ── Decode GT masks + GT boxes ────────────────────────────────────────
+    gts_mask_by_cat = defaultdict(list)
+    gts_box_by_cat  = defaultdict(list)
+    print("[INFO] Decoding GT masks …")
+    decode_errors = 0
+
+    for ann in tqdm(anns, desc="GT masks", ncols=70):
+        img   = images[ann["image_id"]]
+        H, W  = img["height"], img["width"]
+        cname = coco_cats.get(ann["category_id"])
+        if cname not in CLASSES:
+            continue
+
+        seg = ann["segmentation"]
+        try:
+            if isinstance(seg, dict):
+                gt_mask = maskUtils.decode(seg).astype(bool)
+            elif isinstance(seg, list) and len(seg) > 0:
+                gt_mask = polygon_to_mask(seg, H, W)
+            else:
+                decode_errors += 1
+                continue
+        except Exception:
+            decode_errors += 1
+            continue
+
+        rle = maskUtils.encode(np.asfortranarray(gt_mask.astype(np.uint8)))
+        rle["counts"] = rle["counts"].decode("utf-8")
+
+        entry_mask = {"image_id": ann["image_id"], "mask": rle, "cat": cname}
+        gts_mask_by_cat[cname].append(entry_mask)
+
+        # GT box from annotation (COCO format: x,y,w,h)
+        x, y, w, h = ann["bbox"]
+        entry_box  = {"image_id": ann["image_id"],
+                      "bbox": (x, y, x+w, y+h), "cat": cname}
+        gts_box_by_cat[cname].append(entry_box)
+
+    if decode_errors:
+        print(f"[WARN] {decode_errors} GT annotations could not be decoded")
+    print(f"[INFO] GT per category: { {c: len(v) for c,v in gts_mask_by_cat.items()} }")
+
+    # ── Load model ────────────────────────────────────────────────────────
+    if not os.path.isfile(args.checkpoint):
+        print(f"[ERROR] Checkpoint not found: {args.checkpoint}"); sys.exit(1)
+
+    print(f"\n[INFO] Loading model …")
+    from rfdetr import RFDETRSegMedium
+    model = RFDETRSegMedium(pretrain_weights=args.checkpoint, resolution=args.resolution)
+    try:
+        import torch
+        model.optimize_for_inference(compile=True, batch_size=1, dtype=torch.float32)
+        print("[INFO] Model optimized (fp32).")
+    except Exception as e:
+        print(f"[WARN] Optimization skipped: {e}")
+
+    # ── Inference ─────────────────────────────────────────────────────────
+    images_dir = Path(args.images_dir)
+    preds_mask_by_cat = defaultdict(list)
+    preds_box_by_cat  = defaultdict(list)
+    failed = 0
+
+    print(f"\n[INFO] Running inference on {len(images)} images …")
+    print(f"[INFO] Confidence threshold: {args.threshold}")
+    t0 = time.time()
+
+    for img_id, img_info in tqdm(images.items(), desc="Inference", ncols=70):
+        img_path = images_dir / img_info["file_name"]
+        if not img_path.exists():
+            hits = list(images_dir.rglob(img_info["file_name"]))
+            img_path = hits[0] if hits else None
+        if img_path is None or not img_path.exists():
+            failed += 1; continue
+
+        try:
+            preds = run_inference(model, img_path, args.threshold)
+        except Exception as e:
+            print(f"\n[WARN] {img_info['file_name']}: {e}")
+            failed += 1; continue
+
+        for p in preds:
+            cat = p["class_name"]
+            if cat not in CLASSES:
+                continue
+            preds_mask_by_cat[cat].append({
+                "image_id": img_id, "score": p["score"],
+                "mask": p["mask"], "cat": cat})
+            preds_box_by_cat[cat].append({
+                "image_id": img_id, "score": p["score"],
+                "bbox": p["bbox"], "cat": cat})
+
+    elapsed = time.time() - t0
+    total_p = sum(len(v) for v in preds_mask_by_cat.values())
+    print(f"[INFO] Done in {elapsed:.1f}s  |  Total preds: {total_p}  |  Failed: {failed}")
+
+    # ── Compute metrics ───────────────────────────────────────────────────
+    print("\n[INFO] Computing MASK metrics …")
+    rf_mask = compute_metrics(dict(preds_mask_by_cat), dict(gts_mask_by_cat), use_box=False)
+
+    print("[INFO] Computing BOX metrics …")
+    rf_box  = compute_metrics(dict(preds_box_by_cat),  dict(gts_box_by_cat),  use_box=True)
+
+    print_table(rf_mask, rf_box)
+
+    # ── Save JSON ─────────────────────────────────────────────────────────
+    output = {
+        "model": "RF-DETR-Seg-Medium", "checkpoint": str(args.checkpoint),
+        "resolution": args.resolution, "threshold": args.threshold,
+        "dataset": {"images": 374, "annotations": 785,
+                    "note": "CarDD test split"},
+        "mask_ap": {
+            "AP": rf_mask["AP"], "AP50": rf_mask["AP50"], "AP75": rf_mask["AP75"],
+            "per_category": rf_mask["per_category"],
+        },
+        "box_ap": {
+            "AP": rf_box["AP"], "AP50": rf_box["AP50"], "AP75": rf_box["AP75"],
+            "per_category": rf_box["per_category"],
+        },
+        "dcnplus_reference": DCN_PLUS,
+        "inference_stats": {
+            "time_seconds": round(elapsed,1),
+            "failed_images": failed, "total_predictions": total_p,
+        },
+    }
+    with open(args.output_json, "w") as f:
+        json.dump(output, f, indent=2)
+    print(f"\n[INFO] Results saved → {args.output_json}")
+
+    # ── Generate all plots ────────────────────────────────────────────────
+    print("\n[INFO] Generating plots …")
+
+    plot_pr_curves(rf_mask, plots_dir, mode="mask")
+    plot_pr_curves(rf_box,  plots_dir, mode="box")
+
+    mask_best = plot_f1_vs_threshold(dict(preds_mask_by_cat), dict(gts_mask_by_cat),
+                                     plots_dir, mode="mask")
+    box_best  = plot_f1_vs_threshold(dict(preds_box_by_cat),  dict(gts_box_by_cat),
+                                     plots_dir, mode="box")
+
+    plot_ap_comparison_bar(rf_mask, mode="mask", plots_dir=plots_dir)
+    plot_ap_comparison_bar(rf_box,  mode="box",  plots_dir=plots_dir)
+
+    plot_radar(rf_mask, rf_box, plots_dir)
+
+    plot_prf_summary(mask_best, box_best, plots_dir)
+
+    plot_ap_vs_iou(rf_mask, rf_box,
+                   dict(preds_mask_by_cat), dict(gts_mask_by_cat),
+                   dict(preds_box_by_cat),  dict(gts_box_by_cat),
+                   plots_dir)
+
+    plot_confusion(dict(preds_mask_by_cat), dict(gts_mask_by_cat),
+                   plots_dir, mode="mask")
+    plot_confusion(dict(preds_box_by_cat),  dict(gts_box_by_cat),
+                   plots_dir, mode="box")
+
+    # ── NEW: Mask vs Box charts ───────────────────────────────────────────
+    plot_rfdetr_mask_vs_box_overall(rf_mask, rf_box, plots_dir)
+    plot_rfdetr_mask_vs_box_per_category(rf_mask, rf_box, plots_dir)
+    plot_comparison_overall_mask_box(rf_mask, rf_box, plots_dir)
+    plot_comparison_per_category_mask_box(rf_mask, rf_box, plots_dir)
+
+    # ── Save full JSON (all chart values) ────────────────────────────────
+    # AP vs IoU curve data
+    ap_vs_iou_mask, ap_vs_iou_box = [], []
+    for iou in IOU_THRESHOLDS:
+        aps_m, aps_b = [], []
+        for cat in CLASSES:
+            av_m, _, _ = ap_and_curve(dict(preds_mask_by_cat).get(cat, []),
+                                      dict(gts_mask_by_cat).get(cat, []), iou, False)
+            av_b, _, _ = ap_and_curve(dict(preds_box_by_cat).get(cat, []),
+                                      dict(gts_box_by_cat).get(cat, []), iou, True)
+            aps_m.append(av_m); aps_b.append(av_b)
+        ap_vs_iou_mask.append(round(float(np.mean(aps_m)), 2))
+        ap_vs_iou_box.append(round(float(np.mean(aps_b)), 2))
+
+    # PR curve data (IoU=0.50, sampled at 20 points for readability)
+    def sample_curve(rec, prec, n=20):
+        idx = np.linspace(0, len(rec)-1, min(n, len(rec)), dtype=int)
+        return {"recall": [round(float(rec[i]),3) for i in idx],
+                "precision": [round(float(prec[i]),3) for i in idx]}
+
+    pr_curves_mask, pr_curves_box = {}, {}
+    for cat in CLASSES:
+        r_m, p_m = rf_mask["_curves"][cat][0.50]
+        r_b, p_b = rf_box["_curves"][cat][0.50]
+        pr_curves_mask[cat] = sample_curve(r_m, p_m)
+        pr_curves_box[cat]  = sample_curve(r_b, p_b)
+
+    # Delta tables
+    def delta_table(rf_res, mode):
+        dcn = DCN_PLUS[mode]["per_category"]
+        return {cat: round(rf_res["per_category"][cat] - dcn[cat], 1) for cat in CLASSES}
+
+    output = {
+        "model":      "RF-DETR-Seg-Medium",
+        "checkpoint": str(args.checkpoint),
+        "resolution": args.resolution,
+        "threshold":  args.threshold,
+        "dataset":    {"images": 374, "annotations": 785, "note": "CarDD test split"},
+
+        # ── Core AP metrics ──────────────────────────────────────────────
+        "mask_ap": {
+            "AP":   rf_mask["AP"],
+            "AP50": rf_mask["AP50"],
+            "AP75": rf_mask["AP75"],
+            "per_category": rf_mask["per_category"],
+            "per_category_AP50": {c: round(v,1) for c,v in rf_mask["_per_cat_ap50"].items()},
+            "per_category_AP75": {c: round(v,1) for c,v in rf_mask["_per_cat_ap75"].items()},
+        },
+        "box_ap": {
+            "AP":   rf_box["AP"],
+            "AP50": rf_box["AP50"],
+            "AP75": rf_box["AP75"],
+            "per_category": rf_box["per_category"],
+            "per_category_AP50": {c: round(v,1) for c,v in rf_box["_per_cat_ap50"].items()},
+            "per_category_AP75": {c: round(v,1) for c,v in rf_box["_per_cat_ap75"].items()},
+        },
+
+        # ── DCN+ reference ───────────────────────────────────────────────
+        "dcnplus_reference": DCN_PLUS,
+
+        # ── Delta vs DCN+ ────────────────────────────────────────────────
+        "delta_vs_dcnplus": {
+            "mask": {
+                "AP":   round(rf_mask["AP"]   - DCN_PLUS["mask"]["AP"],   1),
+                "AP50": round(rf_mask["AP50"] - DCN_PLUS["mask"]["AP50"], 1),
+                "AP75": round(rf_mask["AP75"] - DCN_PLUS["mask"]["AP75"], 1),
+                "per_category": delta_table(rf_mask, "mask"),
+            },
+            "box": {
+                "AP":   round(rf_box["AP"]   - DCN_PLUS["box"]["AP"],   1),
+                "AP50": round(rf_box["AP50"] - DCN_PLUS["box"]["AP50"], 1),
+                "AP75": round(rf_box["AP75"] - DCN_PLUS["box"]["AP75"], 1),
+                "per_category": delta_table(rf_box, "box"),
+            },
+        },
+
+        # ── Mask vs Box delta (RF-DETR internal) ─────────────────────────
+        "mask_vs_box_delta": {
+            "AP":   round(rf_box["AP"]   - rf_mask["AP"],   1),
+            "AP50": round(rf_box["AP50"] - rf_mask["AP50"], 1),
+            "AP75": round(rf_box["AP75"] - rf_mask["AP75"], 1),
+            "per_category": {
+                cat: round(rf_box["per_category"][cat] - rf_mask["per_category"][cat], 1)
+                for cat in CLASSES
+            },
+        },
+
+        # ── F1 / Precision / Recall at best threshold ─────────────────────
+        "best_threshold_metrics": {
+            "mask": {
+                "threshold":  round(mask_best[0], 3),
+                "precision":  round(mask_best[1], 4),
+                "recall":     round(mask_best[2], 4),
+                "f1":         round(mask_best[3], 4),
+            },
+            "box": {
+                "threshold":  round(box_best[0], 3),
+                "precision":  round(box_best[1], 4),
+                "recall":     round(box_best[2], 4),
+                "f1":         round(box_best[3], 4),
+            },
+        },
+
+        # ── AP vs IoU threshold curve (chart 9) ───────────────────────────
+        "ap_vs_iou_curve": {
+            "iou_thresholds": [round(float(v), 2) for v in IOU_THRESHOLDS],
+            "rf_detr_mask":   ap_vs_iou_mask,
+            "rf_detr_box":    ap_vs_iou_box,
+            "dcnplus_mask_ref_points": {"0.50": DCN_PLUS["mask"]["AP50"],
+                                        "0.75": DCN_PLUS["mask"]["AP75"]},
+            "dcnplus_box_ref_points":  {"0.50": DCN_PLUS["box"]["AP50"],
+                                        "0.75": DCN_PLUS["box"]["AP75"]},
+        },
+
+        # ── PR curve data (IoU=0.50, charts 1 & 2) ───────────────────────
+        "pr_curves_at_iou50": {
+            "mask": pr_curves_mask,
+            "box":  pr_curves_box,
+        },
+
+        # ── Inference stats ───────────────────────────────────────────────
+        "inference_stats": {
+            "time_seconds":      round(elapsed, 1),
+            "failed_images":     failed,
+            "total_predictions": total_p,
+            "predictions_per_category": {
+                c: len(preds_mask_by_cat.get(c, [])) for c in CLASSES},
+        },
+    }
+
+    with open(args.output_json, "w") as f:
+        json.dump(output, f, indent=2)
+    print(f"\n[INFO] Results saved → {args.output_json}")
+
+    print(f"\n[INFO] ✓ All plots saved to: {plots_dir}/")
+    print("[INFO] Files generated:")
+    for f in sorted(plots_dir.glob("*.png")):
+        print(f"        {f.name}")
+
+
+if __name__ == "__main__":
+    main()
