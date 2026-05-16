@@ -1,0 +1,621 @@
+"""
+plot_training_metrics.py
+=========================
+Generates training + validation charts from the RF-DETR CarDD training CSV.
+
+CHARTS GENERATED (saved to ./training_plots/)
+──────────────────────────────────────────────
+  1.  val_map_overview.png            Val mAP50 / mAP50-95 / segm_mAP50 / segm_mAP50-95 over epochs
+  2.  val_map75_mar.png               Val mAP75 + mAR over epochs
+  3.  val_precision_recall_f1.png     Val Precision / Recall / F1 over epochs
+  4.  val_per_category_ap.png         Per-category AP (crack/dent/glass/lamp/scratch/tire) over epochs
+  5.  train_loss_total.png            Total training loss over steps
+  6.  train_loss_components.png       Main loss components (ce / bbox / giou / mask_ce / mask_dice)
+  7.  train_loss_auxiliary.png        Auxiliary decoder losses (layers 0-3 + enc)
+  8.  val_ema_vs_live.png             EMA mAP50 vs live mAP50 (box + segm)
+  9.  val_category_radar.png          Radar: per-category AP at last epoch
+  10. val_loss_curve.png              Validation loss over epochs
+  11. train_cardinality_error.png     Cardinality error over steps
+  12. combined_overview.png           2×2 dashboard: loss / mAP / P-R-F1 / per-cat AP
+
+USAGE
+─────
+  python plot_training_metrics.py --csv metrics.csv --output_dir ./training_plots
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.gridspec import GridSpec
+
+# ── CONSTANTS ─────────────────────────────────────────────────────────────────
+CLASSES = ["crack", "dent", "glass shatter", "lamp broken", "scratch", "tire flat"]
+
+CAT_COLORS = {
+    "crack":         "#E63946",
+    "dent":          "#F4A261",
+    "glass shatter": "#2A9D8F",
+    "lamp broken":   "#457B9D",
+    "scratch":       "#A8DADC",
+    "tire flat":     "#6A0572",
+}
+
+# General palette
+C_MAP50    = "#58A6FF"
+C_MAP5095  = "#1A73E8"
+C_SEG50    = "#3FB950"
+C_SEG5095  = "#2EA043"
+C_MAP75    = "#F78166"
+C_MAR      = "#D2A8FF"
+C_PREC     = "#58A6FF"
+C_REC      = "#3FB950"
+C_F1       = "#F78166"
+C_LOSS     = "#E63946"
+C_LR       = "#F4A261"
+C_EMA      = "#A371F7"
+C_VAL_LOSS = "#F85149"
+
+
+# ── THEME ─────────────────────────────────────────────────────────────────────
+def _style():
+    plt.rcParams.update({
+        "font.family":       "DejaVu Sans",
+        "axes.spines.top":   False,
+        "axes.spines.right": False,
+        "axes.grid":         True,
+        "grid.alpha":        0.3,
+        "grid.linestyle":    "--",
+        "figure.facecolor":  "#0D1117",
+        "axes.facecolor":    "#161B22",
+        "axes.labelcolor":   "#C9D1D9",
+        "xtick.color":       "#C9D1D9",
+        "ytick.color":       "#C9D1D9",
+        "text.color":        "#C9D1D9",
+        "axes.titlecolor":   "#E6EDF3",
+        "legend.facecolor":  "#21262D",
+        "legend.edgecolor":  "#30363D",
+        "grid.color":        "#21262D",
+        "axes.edgecolor":    "#30363D",
+        "lines.linewidth":   2.0,
+    })
+
+
+def _best_epoch_line(ax, epochs, values, color):
+    """Mark the epoch with the best (max) value — dashed line + clearly readable annotation."""
+    idx  = int(np.argmax(np.array(values)))
+    ep_x = epochs.iloc[idx] if hasattr(epochs, "iloc") else epochs[idx]
+    val  = values.iloc[idx]  if hasattr(values,  "iloc") else values[idx]
+    ax.axvline(ep_x, color=color, ls=":", alpha=0.60, lw=1.5)
+    ax.scatter([ep_x], [val], color=color, s=60, zorder=6)
+    ax.annotate(
+        f"{val:.2f}  ep{int(ep_x)}",
+        xy=(ep_x, val),
+        xytext=(8, -14),
+        textcoords="offset points",
+        fontsize=8, color=color, fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.25", facecolor="#0D1117",
+                  edgecolor=color, alpha=0.85, lw=0.8),
+    )
+
+
+def _savefig(fig, path, tight=True):
+    if tight:
+        fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    print(f"  [PLOT] Saved → {path}")
+
+
+# ── DATA LOADING ──────────────────────────────────────────────────────────────
+def load_data(csv_path):
+    df = pd.read_csv(csv_path)
+
+    # Split into val rows (have val/mAP_50) and train rows (have train/loss)
+    val_mask   = df["val/mAP_50"].notna()
+    train_mask = df["train/loss"].notna()
+
+    val_df   = df[val_mask].copy().reset_index(drop=True)
+    train_df = df[train_mask].copy().reset_index(drop=True)
+
+    # Use epoch as x-axis for val (shift 0-based CSV → 1-based display), step for train
+    val_df["epoch_f"]  = val_df["epoch"].astype(int) + 1
+    train_df["step_f"] = train_df["step"].astype(float)
+
+    return val_df, train_df
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 1 ─ Val mAP Overview
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_val_map_overview(val_df, out):
+    _style()
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+
+    ep = val_df["epoch_f"]
+
+    ax.plot(ep, val_df["val/mAP_50"]        * 100, color=C_MAP50,   lw=2.5, label="Box mAP@50")
+    ax.plot(ep, val_df["val/mAP_50_95"]     * 100, color=C_MAP5095, lw=2.5, label="Box mAP@50:95", ls="--")
+    ax.plot(ep, val_df["val/segm_mAP_50"]   * 100, color=C_SEG50,   lw=2.5, label="Segm mAP@50")
+    ax.plot(ep, val_df["val/segm_mAP_50_95"]* 100, color=C_SEG5095, lw=2.5, label="Segm mAP@50:95", ls="--")
+
+    ax.fill_between(ep, val_df["val/mAP_50"]*100,       alpha=0.06, color=C_MAP50)
+    ax.fill_between(ep, val_df["val/segm_mAP_50"]*100,  alpha=0.06, color=C_SEG50)
+
+    _best_epoch_line(ax, ep, val_df["val/mAP_50"]*100,      C_MAP50)
+    _best_epoch_line(ax, ep, val_df["val/segm_mAP_50"]*100, C_SEG50)
+
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("mAP (%)", fontsize=12)
+    ax.set_title("Validation mAP over Training  ·  Box & Segmentation",
+                 fontsize=14, fontweight="bold")
+    ax.legend(fontsize=11, ncol=2)
+    ax.set_ylim(0)
+    ax.set_xticks(ep)
+    _savefig(fig, out / "val_map_overview.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 2 ─ Val mAP75 + mAR
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_val_map75_mar(val_df, out):
+    _style()
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+
+    ep = val_df["epoch_f"]
+
+    # Left: mAP75
+    ax = axes[0]
+    ax.plot(ep, val_df["val/mAP_75"]*100, color=C_MAP75, lw=2.5, label="Box mAP@75")
+    ax.fill_between(ep, val_df["val/mAP_75"]*100, alpha=0.10, color=C_MAP75)
+    _best_epoch_line(ax, ep, val_df["val/mAP_75"]*100, C_MAP75)
+    ax.set_xlabel("Epoch"); ax.set_ylabel("mAP@75 (%)"); ax.set_ylim(0)
+    ax.set_title("Validation mAP@75 (Box)", fontsize=12, fontweight="bold")
+    ax.set_xticks(ep)
+    ax.legend(fontsize=10)
+
+    # Right: mAR
+    ax = axes[1]
+    ax.plot(ep, val_df["val/mAR"]*100,     color=C_MAR,  lw=2.5, label="Box mAR")
+    ax.plot(ep, val_df["val/ema_mAR"]*100, color=C_EMA,  lw=2.0, label="EMA mAR", ls="--", alpha=0.8)
+    ax.fill_between(ep, val_df["val/mAR"]*100, alpha=0.10, color=C_MAR)
+    _best_epoch_line(ax, ep, val_df["val/mAR"]*100, C_MAR)
+    ax.set_xlabel("Epoch"); ax.set_ylabel("mAR (%)"); ax.set_ylim(0)
+    ax.set_title("Validation mAR (Box)", fontsize=12, fontweight="bold")
+    ax.set_xticks(ep)
+    ax.legend(fontsize=10)
+
+    fig.suptitle("Validation mAP@75  &  Mean Average Recall",
+                 fontsize=14, fontweight="bold", color="#E6EDF3", y=1.02)
+    _savefig(fig, out / "val_map75_mar.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 3 ─ Val Precision / Recall / F1
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_val_prf(val_df, out):
+    _style()
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+
+    ep = val_df["epoch_f"]
+    p  = val_df["val/precision"]
+    r  = val_df["val/recall"]
+    f1 = val_df["val/F1"]
+
+    ax.plot(ep, p,  color=C_PREC, lw=2.5, label="Precision")
+    ax.plot(ep, r,  color=C_REC,  lw=2.5, label="Recall")
+    ax.plot(ep, f1, color=C_F1,   lw=2.5, label="F1")
+
+    ax.fill_between(ep, f1, alpha=0.10, color=C_F1)
+
+    _best_epoch_line(ax, ep, f1.values, C_F1)
+    _best_epoch_line(ax, ep, p.values,  C_PREC)
+    _best_epoch_line(ax, ep, r.values,  C_REC)
+
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.set_ylim(0, 1.05)
+    ax.set_title("Validation Precision / Recall / F1 over Training",
+                 fontsize=14, fontweight="bold")
+    ax.legend(fontsize=11)
+    ax.set_xticks(ep)
+    _savefig(fig, out / "val_precision_recall_f1.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 4 ─ Per-Category AP over Epochs
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_per_category_ap(val_df, out):
+    _style()
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    fig.suptitle("Validation AP per Damage Category over Training",
+                 fontsize=14, fontweight="bold", color="#E6EDF3", y=1.01)
+
+    ep = val_df["epoch_f"]
+
+    for i, cat in enumerate(CLASSES):
+        ax  = axes[i // 3][i % 3]
+        col = CAT_COLORS[cat]
+        col_name = f"val/AP/{cat}"
+
+        if col_name not in val_df.columns:
+            ax.set_visible(False)
+            continue
+
+        vals = val_df[col_name] * 100
+        ax.plot(ep, vals, color=col, lw=2.5)
+        ax.fill_between(ep, vals, alpha=0.14, color=col)
+        _best_epoch_line(ax, ep, vals, col)
+
+        ax.set_title(cat, fontsize=12, fontweight="bold", color=col)
+        ax.set_xlabel("Epoch", fontsize=9)
+        ax.set_ylabel("AP (%)", fontsize=9)
+        ax.set_ylim(0)
+        ax.set_xticks(ep)
+
+        # Final value annotation
+        ax.text(0.98, 0.06, f"Final: {vals.iloc[-1]:.1f}%",
+                transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=9, color=col, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#21262D",
+                          edgecolor=col, alpha=0.7))
+
+    _savefig(fig, out / "val_per_category_ap.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 5 ─ Training Total Loss
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_train_loss_total(train_df, out):
+    _style()
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+
+    st = train_df["step_f"]
+    ax.plot(st, train_df["train/loss"], color=C_LOSS, lw=2.0, alpha=0.4, label="Raw")
+
+    # Smoothed
+    w = max(1, len(train_df) // 20)
+    smoothed = train_df["train/loss"].rolling(w, center=True, min_periods=1).mean()
+    ax.plot(st, smoothed, color=C_LOSS, lw=2.5, label=f"Smoothed (w={w})")
+    ax.fill_between(st, smoothed, alpha=0.10, color=C_LOSS)
+
+    ax.set_xlabel("Training Step", fontsize=12)
+    ax.set_ylabel("Total Loss", fontsize=12)
+    ax.set_title("Training Total Loss over Steps",
+                 fontsize=14, fontweight="bold")
+    ax.legend(fontsize=11)
+    _savefig(fig, out / "train_loss_total.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 6 ─ Training Loss Components
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_train_loss_components(train_df, out):
+    _style()
+
+    components = {
+        "CE (class)":    ("train/loss_ce",        "#58A6FF"),
+        "BBox L1":       ("train/loss_bbox",       "#F4A261"),
+        "GIoU":          ("train/loss_giou",       "#2A9D8F"),
+        "Mask CE":       ("train/loss_mask_ce",    "#E63946"),
+        "Mask Dice":     ("train/loss_mask_dice",  "#A371F7"),
+    }
+
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    fig.suptitle("Training Loss Components over Steps",
+                 fontsize=14, fontweight="bold", color="#E6EDF3", y=1.01)
+
+    st = train_df["step_f"]
+    w  = max(1, len(train_df) // 20)
+
+    for idx, (label, (col_name, color)) in enumerate(components.items()):
+        ax = axes[idx // 3][idx % 3]
+        if col_name not in train_df.columns:
+            ax.set_visible(False)
+            continue
+
+        raw      = train_df[col_name]
+        smoothed = raw.rolling(w, center=True, min_periods=1).mean()
+        ax.plot(st, raw,      color=color, lw=1.2, alpha=0.30)
+        ax.plot(st, smoothed, color=color, lw=2.2, label=label)
+        ax.fill_between(st, smoothed, alpha=0.12, color=color)
+
+        ax.set_title(label, fontsize=11, fontweight="bold", color=color)
+        ax.set_xlabel("Step", fontsize=9)
+        ax.set_ylabel("Loss", fontsize=9)
+
+    # 6th panel: all smoothed on same axis
+    ax = axes[1][2]
+    for label, (col_name, color) in components.items():
+        if col_name in train_df.columns:
+            sm = train_df[col_name].rolling(w, center=True, min_periods=1).mean()
+            ax.plot(st, sm, color=color, lw=1.8, label=label)
+    ax.set_title("All Components (overlay)", fontsize=11, fontweight="bold")
+    ax.set_xlabel("Step"); ax.set_ylabel("Loss")
+    ax.legend(fontsize=8, ncol=2)
+
+    _savefig(fig, out / "train_loss_components.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 7 ─ Auxiliary Decoder Loss Layers
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_train_loss_auxiliary(train_df, out):
+    _style()
+
+    aux_groups = {
+        "CE (auxiliary)":        [f"train/loss_ce_{i}" for i in range(4)] + ["train/loss_ce_enc"],
+        "BBox L1 (auxiliary)":   [f"train/loss_bbox_{i}" for i in range(4)] + ["train/loss_bbox_enc"],
+        "GIoU (auxiliary)":      [f"train/loss_giou_{i}" for i in range(4)] + ["train/loss_giou_enc"],
+        "Mask CE (auxiliary)":   [f"train/loss_mask_ce_{i}" for i in range(4)] + ["train/loss_mask_ce_enc"],
+        "Mask Dice (auxiliary)": [f"train/loss_mask_dice_{i}" for i in range(4)] + ["train/loss_mask_dice_enc"],
+    }
+    layer_colors = ["#58A6FF", "#F4A261", "#2A9D8F", "#E63946", "#A371F7", "#F78166"]
+    layer_labels = ["Layer 0", "Layer 1", "Layer 2", "Layer 3", "Enc"]
+
+    fig, axes = plt.subplots(3, 2, figsize=(16, 14))
+    fig.suptitle("Auxiliary Decoder Layer Losses over Steps",
+                 fontsize=14, fontweight="bold", color="#E6EDF3", y=1.01)
+
+    st = train_df["step_f"]
+    w  = max(1, len(train_df) // 20)
+
+    for idx, (group_label, cols) in enumerate(aux_groups.items()):
+        ax = axes[idx // 2][idx % 2]
+        for ci, (col, lbl) in enumerate(zip(cols, layer_labels)):
+            if col in train_df.columns:
+                sm = train_df[col].rolling(w, center=True, min_periods=1).mean()
+                ax.plot(st, sm, color=layer_colors[ci], lw=1.8, label=lbl)
+
+        ax.set_title(group_label, fontsize=11, fontweight="bold")
+        ax.set_xlabel("Step", fontsize=9); ax.set_ylabel("Loss", fontsize=9)
+        ax.legend(fontsize=8, ncol=3)
+
+    # Hide the last empty panel
+    axes[2][1].set_visible(False)
+    _savefig(fig, out / "train_loss_auxiliary.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 9 ─ EMA vs Live mAP
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_ema_vs_live(val_df, out):
+    _style()
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+
+    ep = val_df["epoch_f"]
+
+    # Box mAP
+    ax = axes[0]
+    ax.plot(ep, val_df["val/mAP_50"]*100,     color=C_MAP50, lw=2.5, label="Live mAP@50")
+    ax.plot(ep, val_df["val/ema_mAP_50"]*100, color=C_EMA,   lw=2.0, ls="--", label="EMA mAP@50")
+    ax.plot(ep, val_df["val/mAP_50_95"]*100,     color=C_MAP5095, lw=2.5, label="Live mAP@50:95")
+    ax.plot(ep, val_df["val/ema_mAP_50_95"]*100, color="#D2A8FF", lw=2.0, ls="--", label="EMA mAP@50:95")
+    ax.fill_between(ep, val_df["val/mAP_50"]*100, val_df["val/ema_mAP_50"]*100,
+                    alpha=0.08, color=C_EMA)
+    ax.set_title("Box mAP: Live vs EMA", fontsize=12, fontweight="bold")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("mAP (%)"); ax.set_ylim(0)
+    ax.set_xticks(ep)
+    ax.legend(fontsize=9, ncol=2)
+
+    # Segm mAP
+    ax = axes[1]
+    ax.plot(ep, val_df["val/segm_mAP_50"]*100,     color=C_SEG50,  lw=2.5, label="Live Segm mAP@50")
+    ax.plot(ep, val_df["val/ema_segm_mAP_50"]*100, color=C_EMA,    lw=2.0, ls="--", label="EMA Segm mAP@50")
+    ax.plot(ep, val_df["val/segm_mAP_50_95"]*100,     color=C_SEG5095, lw=2.5, label="Live Segm mAP@50:95")
+    ax.plot(ep, val_df["val/ema_segm_mAP_50_95"]*100, color="#D2A8FF", lw=2.0, ls="--", label="EMA Segm mAP@50:95")
+    ax.fill_between(ep, val_df["val/segm_mAP_50"]*100, val_df["val/ema_segm_mAP_50"]*100,
+                    alpha=0.08, color=C_EMA)
+    ax.set_title("Segm mAP: Live vs EMA", fontsize=12, fontweight="bold")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("mAP (%)"); ax.set_ylim(0)
+    ax.set_xticks(ep)
+    ax.legend(fontsize=9, ncol=2)
+
+    fig.suptitle("EMA  vs  Live Validation mAP  (Box & Segmentation)",
+                 fontsize=14, fontweight="bold", color="#E6EDF3", y=1.02)
+    _savefig(fig, out / "val_ema_vs_live.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 10 ─ Per-Category AP Radar (last epoch)
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_category_radar(val_df, out):
+    _style()
+
+    # Use last epoch values
+    last = val_df.iloc[-1]
+    vals = [last[f"val/AP/{c}"] * 100 for c in CLASSES]
+
+    n      = len(CLASSES)
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    angles += angles[:1]
+    vals_c  = vals + vals[:1]
+
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    ax.set_facecolor("#161B22")
+    fig.patch.set_facecolor("#0D1117")
+
+    # Shaded category segments
+    for i, (cat, color) in enumerate(CAT_COLORS.items()):
+        seg_angles = [angles[i], angles[i], angles[(i+1) % n], angles[(i+1) % n]]
+        ax.fill([angles[i], angles[(i+1)%n], angles[(i+1)%n], angles[i]],
+                [0, 0, 100, 100], color=color, alpha=0.04)
+
+    ax.plot(angles, vals_c,  color="#1A73E8", lw=2.5)
+    ax.fill(angles, vals_c,  color="#1A73E8", alpha=0.18)
+
+    # Per-category colored dots
+    for i, (cat, color) in enumerate(CAT_COLORS.items()):
+        ax.scatter([angles[i]], [vals[i]], color=color, s=90, zorder=6)
+        ax.annotate(f"{vals[i]:.1f}%",
+                    xy=(angles[i], vals[i]),
+                    fontsize=8.5, color=color,
+                    ha="center", va="bottom")
+
+    last_ep = int(val_df["epoch_f"].iloc[-1])
+    ax.set_thetagrids(np.degrees(angles[:-1]),
+                      [c.replace(" ", "\n") for c in CLASSES],
+                      fontsize=10, color="#C9D1D9")
+    ax.set_ylim(0, 100)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(["20", "40", "60", "80", "100"], color="#8B949E", fontsize=8)
+    ax.grid(color="#21262D", linestyle="--", alpha=0.5)
+    ax.spines["polar"].set_color("#30363D")
+
+    ax.set_title(f"Per-Category AP Radar  ·  Epoch {last_ep}",
+                 fontsize=13, fontweight="bold", color="#E6EDF3", pad=20)
+
+    _savefig(fig, out / "val_category_radar.png", tight=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 11 ─ Validation Loss
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_val_loss(val_df, out):
+    _style()
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+
+    ep = val_df["epoch_f"]
+    ax.plot(ep, val_df["val/loss"], color=C_VAL_LOSS, lw=2.5, label="Val Loss")
+    ax.fill_between(ep, val_df["val/loss"], alpha=0.12, color=C_VAL_LOSS)
+
+    # Mark minimum with a dot only
+    idx = val_df["val/loss"].idxmin()
+    min_val = val_df["val/loss"].iloc[idx]
+    min_ep  = ep.iloc[idx]
+    ax.scatter([min_ep], [min_val], color=C_VAL_LOSS, s=80, zorder=5,
+               label=f"Min: {min_val:.2f} (ep {int(min_ep)})")
+
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Validation Loss", fontsize=12)
+    ax.set_title("Validation Loss over Training", fontsize=14, fontweight="bold")
+    ax.set_xticks(ep)
+    ax.legend(fontsize=11)
+    _savefig(fig, out / "val_loss_curve.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 12 ─ Cardinality Error
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_cardinality_error(train_df, out):
+    _style()
+    fig, ax = plt.subplots(figsize=(12, 5.0))
+
+    st = train_df["step_f"]
+    w  = max(1, len(train_df) // 20)
+
+    layers = {
+        "Main":    ("train/cardinality_error",   "#58A6FF"),
+        "Layer 0": ("train/cardinality_error_0", "#F4A261"),
+        "Layer 1": ("train/cardinality_error_1", "#2A9D8F"),
+        "Layer 2": ("train/cardinality_error_2", "#A371F7"),
+        "Layer 3": ("train/cardinality_error_3", "#E63946"),
+        "Enc":     ("train/cardinality_error_enc","#3FB950"),
+    }
+
+    for lbl, (col, color) in layers.items():
+        if col in train_df.columns:
+            sm = train_df[col].rolling(w, center=True, min_periods=1).mean()
+            ax.plot(st, sm, color=color, lw=1.8, label=lbl)
+
+    ax.set_xlabel("Training Step", fontsize=12)
+    ax.set_ylabel("Cardinality Error", fontsize=12)
+    ax.set_title("Cardinality Error over Training (per Decoder Layer)",
+                 fontsize=14, fontweight="bold")
+    ax.legend(fontsize=10, ncol=3)
+    _savefig(fig, out / "train_cardinality_error.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CHART 13 ─ Combined 2×2 Dashboard
+# ══════════════════════════════════════════════════════════════════════════════
+def plot_combined_dashboard(val_df, train_df, out):
+    _style()
+    fig = plt.figure(figsize=(18, 13))
+    fig.patch.set_facecolor("#0D1117")
+    gs = GridSpec(2, 2, figure=fig, hspace=0.38, wspace=0.30)
+
+    ep = val_df["epoch_f"]
+    st = train_df["step_f"]
+    w  = max(1, len(train_df) // 20)
+
+    # ─── Top-left: Training loss ───────────────────────────────────────────
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.set_facecolor("#161B22")
+    raw      = train_df["train/loss"]
+    smoothed = raw.rolling(w, center=True, min_periods=1).mean()
+    ax1.plot(st, raw,      color=C_LOSS, lw=1.0, alpha=0.30)
+    ax1.plot(st, smoothed, color=C_LOSS, lw=2.5, label="Total loss (smoothed)")
+    ax1.fill_between(st, smoothed, alpha=0.10, color=C_LOSS)
+    ax1.set_title("Training Loss", fontsize=12, fontweight="bold")
+    ax1.set_xlabel("Step"); ax1.set_ylabel("Loss")
+    ax1.legend(fontsize=9)
+
+    # ─── Top-right: Val mAP ────────────────────────────────────────────────
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax2.set_facecolor("#161B22")
+    ax2.plot(ep, val_df["val/mAP_50"]*100,        color=C_MAP50,   lw=2.2, label="Box mAP@50")
+    ax2.plot(ep, val_df["val/mAP_50_95"]*100,      color=C_MAP5095, lw=2.2, label="Box mAP@50:95", ls="--")
+    ax2.plot(ep, val_df["val/segm_mAP_50"]*100,    color=C_SEG50,   lw=2.2, label="Segm mAP@50")
+    ax2.plot(ep, val_df["val/segm_mAP_50_95"]*100, color=C_SEG5095, lw=2.2, label="Segm mAP@50:95", ls="--")
+    ax2.fill_between(ep, val_df["val/mAP_50"]*100, alpha=0.06, color=C_MAP50)
+    ax2.set_title("Validation mAP", fontsize=12, fontweight="bold")
+    ax2.set_xlabel("Epoch"); ax2.set_ylabel("mAP (%)"); ax2.set_ylim(0)
+    ax2.set_xticks(ep)
+    ax2.legend(fontsize=8, ncol=2)
+
+    # ─── Bottom-left: Precision / Recall / F1 ─────────────────────────────
+    ax3 = fig.add_subplot(gs[1, 0])
+    ax3.set_facecolor("#161B22")
+    ax3.plot(ep, val_df["val/precision"], color=C_PREC, lw=2.2, label="Precision")
+    ax3.plot(ep, val_df["val/recall"],    color=C_REC,  lw=2.2, label="Recall")
+    ax3.plot(ep, val_df["val/F1"],        color=C_F1,   lw=2.2, label="F1")
+    ax3.fill_between(ep, val_df["val/F1"], alpha=0.10, color=C_F1)
+    ax3.set_title("Precision / Recall / F1", fontsize=12, fontweight="bold")
+    ax3.set_xlabel("Epoch"); ax3.set_ylabel("Score"); ax3.set_ylim(0, 1.05)
+    ax3.set_xticks(ep)
+    ax3.legend(fontsize=9)
+
+    # ─── Bottom-right: Per-category AP (last epoch bar) ───────────────────
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.set_facecolor("#161B22")
+    last  = val_df.iloc[-1]
+    last_ep = int(val_df["epoch_f"].iloc[-1])
+    cats  = CLASSES
+    vals  = [last[f"val/AP/{c}"] * 100 for c in cats]
+    bars  = ax4.bar(range(len(cats)), vals,
+                    color=[CAT_COLORS[c] for c in cats],
+                    edgecolor="#30363D", alpha=0.88)
+    for bar, val in zip(bars, vals):
+        ax4.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
+                 f"{val:.1f}", ha="center", va="bottom", fontsize=8.5,
+                 color=bar.get_facecolor(), fontweight="bold")
+    ax4.set_xticks(range(len(cats)))
+    ax4.set_xticklabels([c.replace(" ", "\n") for c in cats], fontsize=8.5)
+    ax4.set_ylabel("AP (%)"); ax4.set_ylim(0, 105)
+    ax4.set_title(f"Per-Category AP  ·  Epoch {last_ep}", fontsize=12, fontweight="bold")
+
+    fig.suptitle("RF-DETR-Seg  ·  Training Dashboard",
+                 fontsize=16, fontweight="bold", color="#E6EDF3", y=1.01)
+    _savefig(fig, out / "combined_overview.png", tight=False)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════════════════════
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--csv",        default="metrics.csv",
+                   help="Path to the training metrics CSV")
+    p.add_argument("--output_dir", default="./training_plots",
+                   help="Directory to save charts")
+    return p.parse_args()
+
+
