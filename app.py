@@ -10,6 +10,20 @@ import shutil
 from flask import Flask, render_template
 
 
+def _clean_uploads(upload_folder: str) -> None:
+    """Delete all files inside the uploads folder on startup."""
+    if not os.path.isdir(upload_folder):
+        return
+    for entry in os.scandir(upload_folder):
+        try:
+            if entry.is_file() or entry.is_symlink():
+                os.remove(entry.path)
+            elif entry.is_dir():
+                shutil.rmtree(entry.path)
+        except Exception as exc:
+            print(f"[startup] Could not remove {entry.path}: {exc}")
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -29,6 +43,7 @@ def create_app():
     app.config["SAVE_COCO_DEFAULT"]  = SAVE_COCO_DEFAULT
 
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    _clean_uploads(UPLOAD_FOLDER)
 
     # ── Register blueprints
     from base.com.controller.car_analysis_controller import bp as car_bp
