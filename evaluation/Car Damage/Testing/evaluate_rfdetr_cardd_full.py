@@ -725,12 +725,6 @@ def plot_rfdetr_mask_vs_box_overall(rf_mask, rf_box, plots_dir):
                  fontsize=13, fontweight="bold")
     ax.legend(fontsize=11)
 
-    # Subtle annotation strip
-    ax.axhspan(0, 5, color="#161B22", zorder=0)
-    ax.text(0.99, 0.02, "CarDD Test Set · 374 images",
-            transform=ax.transAxes, ha="right", va="bottom",
-            fontsize=8, color="#8B949E")
-
     _savefig(fig, plots_dir / "rfdetr_mask_vs_box_overall.png")
 
 
