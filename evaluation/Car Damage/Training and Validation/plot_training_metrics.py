@@ -619,3 +619,42 @@ def parse_args():
     return p.parse_args()
 
 
+def main():
+    args  = parse_args()
+    out   = Path(args.output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    print(f"[INFO] Loading CSV: {args.csv}")
+    val_df, train_df = load_data(args.csv)
+    print(f"[INFO] Val rows  : {len(val_df)}  |  Train rows: {len(train_df)}")
+    print(f"[INFO] Epochs    : {int(val_df['epoch_f'].min())} → {int(val_df['epoch_f'].max())}")
+    print(f"[INFO] Steps     : {int(train_df['step_f'].min())} → {int(train_df['step_f'].max())}")
+    print(f"[INFO] Output dir: {out}/\n")
+
+    charts = [
+        ("Chart 1  – Val mAP Overview",          lambda: plot_val_map_overview(val_df, out)),
+        ("Chart 2  – Val mAP75 & mAR",           lambda: plot_val_map75_mar(val_df, out)),
+        ("Chart 3  – Val Precision/Recall/F1",   lambda: plot_val_prf(val_df, out)),
+        ("Chart 4  – Val Per-Category AP",        lambda: plot_per_category_ap(val_df, out)),
+        ("Chart 5  – Train Total Loss",           lambda: plot_train_loss_total(train_df, out)),
+        ("Chart 6  – Train Loss Components",      lambda: plot_train_loss_components(train_df, out)),
+        ("Chart 7  – Train Auxiliary Losses",     lambda: plot_train_loss_auxiliary(train_df, out)),
+        ("Chart 8  – EMA vs Live mAP",            lambda: plot_ema_vs_live(val_df, out)),
+        ("Chart 9  – Per-Category Radar",         lambda: plot_category_radar(val_df, out)),
+        ("Chart 10 – Validation Loss",            lambda: plot_val_loss(val_df, out)),
+        ("Chart 11 – Cardinality Error",          lambda: plot_cardinality_error(train_df, out)),
+        ("Chart 12 – Combined Dashboard",         lambda: plot_combined_dashboard(val_df, train_df, out)),
+    ]
+
+    for name, fn in charts:
+        print(f"[INFO] Generating {name} …")
+        fn()
+
+    print(f"\n[INFO] ✓ All {len(charts)} charts saved to: {out}/")
+    print("[INFO] Files:")
+    for f in sorted(out.glob("*.png")):
+        print(f"        {f.name}")
+
+
+if __name__ == "__main__":
+    main()
