@@ -1,0 +1,677 @@
+"""
+evaluate_rfdetr_carparts.py
+============================
+Evaluates RF-DETR segmentation on the Car Parts test set.
+No external baseline comparison — all charts are self-contained RF-DETR metrics.
+
+19 CAR PART CLASSES
+────────────────────
+  Diggi_Back_Door, Diggi_Back_Door_Glass, Fender,
+  Front_Bumper, Front_Door, Front_Door_Glass,
+  Front_Windshield_Glass, Grill, Headlight,
+  Hood_Bonnet, Quarter_Panel, Rear_Bumper,
+  Rear_Door, Rear_Door_Glass, Roof,
+  Running_Board, Side_Mirror, Taillight, tyre
+
+METRICS COMPUTED
+────────────────
+  Mask AP / AP50 / AP75 / per-category   (instance segmentation)
+  Box  AP / AP50 / AP75 / per-category   (bounding box)
+
+CHARTS GENERATED (saved to --plots_dir, default ./plots_parts/)
+────────────────────────────────────────────────────────────────
+  1.  pr_curve_mask_page1/2.png          PR curves per category (mask) — 10 per page
+  2.  pr_curve_box_page1/2.png           PR curves per category (box)
+  3.  f1_vs_threshold_mask.png           F1 / P / R vs confidence threshold (mask)
+  4.  f1_vs_threshold_box.png            F1 / P / R vs confidence threshold (box)
+  5.  ap_per_category_mask.png           Horizontal bar — per-category mask AP (sorted)
+  6.  ap_per_category_box.png            Horizontal bar — per-category box AP (sorted)
+  7.  mask_vs_box_overall.png            Grouped bar — Mask vs Box for AP/AP50/AP75
+  8.  mask_vs_box_per_category.png       Grouped bar — Mask vs Box per category
+  9.  iou_ap_curve.png                   AP vs IoU threshold (mask + box)
+  10. category_group_ap.png              AP by region group (Front/Rear/Side/Other)
+  11. ap50_ap75_scatter.png              Scatter: AP50 vs AP75 per category (mask)
+  12. confusion_heatmap_mask.png         TP-rate heatmap (mask @IoU=0.50)
+  13. confidence_distribution.png        Histogram of predicted confidence scores
+
+JSON OUTPUT
+───────────
+  All chart data, AP metrics, PR curves, F1 sweep, AP-vs-IoU
+  saved to --output_json (default: rfdetr_carparts_results.json)
+
+USAGE
+─────
+  python evaluate_rfdetr_carparts.py \\
+      --images_dir  /path/to/test/images \\
+      --annotations /path/to/_annotations.coco.json \\
+      --checkpoint  /path/to/checkpoint_best_total.pth \\
+      --resolution  960 \\
+      --threshold   0.001 \\
+      --output_json rfdetr_carparts_results.json \\
+      --plots_dir   ./plots_parts
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from collections import defaultdict
+
+import numpy as np
+from PIL import Image
+from tqdm import tqdm
+from pycocotools import mask as maskUtils
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+# ── DEFAULTS ──────────────────────────────────────────────────────────────────
+IMAGES_DIR  = "/path/to/test/images"
+ANNOTATIONS = "/path/to/test/annotations.coco.json"
+CHECKPOINT  = "/path/to/checkpoint_best_total.pth"
+RESOLUTION  = 960
+THRESHOLD   = 0.001
+OUTPUT_JSON = "rfdetr_carparts_results.json"
+PLOTS_DIR   = "./plots_parts"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# All 19 car part classes (order matches annotation file)
+CLASSES = [
+    "Diggi_Back_Door", "Diggi_Back_Door_Glass", "Fender",
+    "Front_Bumper", "Front_Door", "Front_Door_Glass",
+    "Front_Windshield_Glass", "Grill", "Headlight",
+    "Hood_Bonnet", "Quarter_Panel", "Rear_Bumper",
+    "Rear_Door", "Rear_Door_Glass", "Roof",
+    "Running_Board", "Side_Mirror", "Taillight",
+    "tyre",
+]
+
+# Per-category colours (cycle through a palette)
+_PALETTE = [
+    "#E63946","#F4A261","#2A9D8F","#457B9D","#A8DADC","#6A0572",
+    "#1A73E8","#E8710A","#3FB950","#F78166","#58A6FF","#FF7B72",
+    "#D29922","#79C0FF","#56D364","#FFA657","#FF6E96","#A5D6FF",
+    "#7EE787","#FFD700","#C9D1D9","#8B949E","#E6EDF3","#B1BAC4",
+    "#30363D","#21262D","#161B22","#0D1117","#0969DA",
+]
+CAT_COLORS = {c: _PALETTE[i % len(_PALETTE)] for i, c in enumerate(CLASSES)}
+
+IOU_THRESHOLDS = np.arange(0.50, 1.00, 0.05)   # 10 thresholds
+
+
+# ── STYLE ─────────────────────────────────────────────────────────────────────
+def _style():
+    plt.rcParams.update({
+        "font.family":       "DejaVu Sans",
+        "axes.spines.top":   False,
+        "axes.spines.right": False,
+        "axes.grid":         True,
+        "grid.alpha":        0.3,
+        "grid.linestyle":    "--",
+        "figure.facecolor":  "#0D1117",
+        "axes.facecolor":    "#161B22",
+        "axes.labelcolor":   "#C9D1D9",
+        "xtick.color":       "#C9D1D9",
+        "ytick.color":       "#C9D1D9",
+        "text.color":        "#C9D1D9",
+        "axes.titlecolor":   "#E6EDF3",
+        "legend.facecolor":  "#21262D",
+        "legend.edgecolor":  "#30363D",
+        "grid.color":        "#21262D",
+    })
+
+def _savefig(fig, path, tight=True):
+    if tight:
+        fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    print(f"  [PLOT] → {path.name}")
+
+
+# ── MASK UTILITIES ────────────────────────────────────────────────────────────
+def polygon_to_mask(segmentation, height, width):
+    try:
+        rles = maskUtils.frPyObjects(segmentation, height, width)
+        rle  = maskUtils.merge(rles)
+        return maskUtils.decode(rle).astype(bool)
+    except Exception:
+        from PIL import ImageDraw
+        m = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(m)
+        for poly in segmentation:
+            pts = [(poly[i], poly[i+1]) for i in range(0, len(poly), 2)]
+            if len(pts) >= 3:
+                draw.polygon(pts, outline=1, fill=1)
+        return np.array(m, dtype=bool)
+
+def pred_mask_to_full(local_mask, full_h, full_w):
+    blank = np.zeros((full_h, full_w), dtype=bool)
+    mh, mw = local_mask.shape
+    h, w = min(mh, full_h), min(mw, full_w)
+    blank[:h, :w] = local_mask[:h, :w]
+    return blank
+
+def mask_to_bbox(mask_bool):
+    rows = np.any(mask_bool, axis=1)
+    cols = np.any(mask_bool, axis=0)
+    if not rows.any():
+        return None
+    y1, y2 = np.where(rows)[0][[0, -1]]
+    x1, x2 = np.where(cols)[0][[0, -1]]
+    return float(x1), float(y1), float(x2), float(y2)
+
+def box_iou(b1, b2):
+    ix1 = max(b1[0], b2[0]); iy1 = max(b1[1], b2[1])
+    ix2 = min(b1[2], b2[2]); iy2 = min(b1[3], b2[3])
+    iw = max(0, ix2-ix1);    ih = max(0, iy2-iy1)
+    inter = iw * ih
+    a1 = (b1[2]-b1[0])*(b1[3]-b1[1])
+    a2 = (b2[2]-b2[0])*(b2[3]-b2[1])
+    union = a1 + a2 - inter
+    return inter / union if union > 0 else 0.0
+
+
+# ── AP ENGINE ─────────────────────────────────────────────────────────────────
+def ap_101point(recalls, precisions):
+    r = np.concatenate(([0.0], recalls,    [1.0]))
+    p = np.concatenate(([0.0], precisions, [0.0]))
+    for i in range(len(p)-2, -1, -1):
+        p[i] = max(p[i], p[i+1])
+    idx = np.where(r[1:] != r[:-1])[0]
+    return float(np.sum((r[idx+1]-r[idx]) * p[idx+1]))
+
+def ap_and_curve(preds, gts, iou_thresh, use_box=False):
+    if not preds or not gts:
+        return 0.0, np.array([0.0]), np.array([0.0])
+    gt_by_img = defaultdict(list)
+    for i, g in enumerate(gts):
+        gt_by_img[g["image_id"]].append((i, g))
+    preds_sorted = sorted(preds, key=lambda x: -x["score"])
+    tp = np.zeros(len(preds_sorted))
+    fp = np.zeros(len(preds_sorted))
+    matched = set()
+    for pi, pred in enumerate(preds_sorted):
+        best_iou = iou_thresh - 1e-9
+        best_gi  = -1
+        for gi, g in gt_by_img.get(pred["image_id"], []):
+            if gi in matched:
+                continue
+            iou = (box_iou(pred["bbox"], g["bbox"]) if use_box
+                   else maskUtils.iou([pred["mask"]], [g["mask"]], [0])[0][0])
+            if iou > best_iou:
+                best_iou = iou; best_gi = gi
+        if best_gi >= 0:
+            tp[pi] = 1; matched.add(best_gi)
+        else:
+            fp[pi] = 1
+    n_gt = len(gts)
+    tp_c = np.cumsum(tp); fp_c = np.cumsum(fp)
+    rec  = tp_c / (n_gt + 1e-6)
+    prec = tp_c / (tp_c + fp_c + 1e-6)
+    return ap_101point(rec, prec) * 100.0, rec, prec
+
+def compute_metrics(preds_by_cat, gts_by_cat, use_box=False):
+    per_cat_ap, per_cat_ap50, per_cat_ap75 = {}, {}, {}
+    curves = {}
+    for cat in CLASSES:
+        preds = preds_by_cat.get(cat, [])
+        gts   = gts_by_cat.get(cat, [])
+        aps_all = []
+        cat_curves = {}
+        for iou in IOU_THRESHOLDS:
+            v, rec, prec = ap_and_curve(preds, gts, iou, use_box)
+            aps_all.append(v)
+            cat_curves[round(float(iou), 2)] = (rec, prec)
+        per_cat_ap[cat]   = float(np.mean(aps_all))
+        per_cat_ap50[cat] = ap_and_curve(preds, gts, 0.50, use_box)[0]
+        per_cat_ap75[cat] = ap_and_curve(preds, gts, 0.75, use_box)[0]
+        curves[cat] = cat_curves
+    AP   = float(np.mean(list(per_cat_ap.values())))
+    AP50 = float(np.mean(list(per_cat_ap50.values())))
+    AP75 = float(np.mean(list(per_cat_ap75.values())))
+    return {
+        "AP":           round(AP, 1),
+        "AP50":         round(AP50, 1),
+        "AP75":         round(AP75, 1),
+        "per_category":      {c: round(v, 1) for c, v in per_cat_ap.items()},
+        "_per_cat_ap50":     per_cat_ap50,
+        "_per_cat_ap75":     per_cat_ap75,
+        "_curves":           curves,
+    }
+
+def compute_f1_sweep(preds_by_cat, gts_by_cat, use_box=False, n_steps=50):
+    thresholds = np.linspace(0.0, 1.0, n_steps)
+    precs, recs, f1s = [], [], []
+    for thr in thresholds:
+        tp_t = fp_t = fn_t = 0
+        for cat in CLASSES:
+            preds = [p for p in preds_by_cat.get(cat, []) if p["score"] >= thr]
+            gts   = gts_by_cat.get(cat, [])
+            if not gts:
+                continue
+            gt_by_img = defaultdict(list)
+            for i, g in enumerate(gts):
+                gt_by_img[g["image_id"]].append((i, g))
+            preds_s = sorted(preds, key=lambda x: -x["score"])
+            matched = set()
+            tp = 0
+            for pred in preds_s:
+                best = 0.50 - 1e-9; best_gi = -1
+                for gi, g in gt_by_img.get(pred["image_id"], []):
+                    if gi in matched: continue
+                    iou = (box_iou(pred["bbox"], g["bbox"]) if use_box
+                           else maskUtils.iou([pred["mask"]], [g["mask"]], [0])[0][0])
+                    if iou > best: best = iou; best_gi = gi
+                if best_gi >= 0: tp += 1; matched.add(best_gi)
+            tp_t += tp; fp_t += len(preds) - tp; fn_t += len(gts) - tp
+        p = tp_t / (tp_t + fp_t + 1e-9)
+        r = tp_t / (tp_t + fn_t + 1e-9)
+        f = 2*p*r / (p + r + 1e-9)
+        precs.append(p); recs.append(r); f1s.append(f)
+    return thresholds, np.array(precs), np.array(recs), np.array(f1s)
+
+
+# ── CHART 1 & 2 : PR curves (2 pages of 10/9) ────────────────────────────────
+def plot_pr_curves_paged(results, plots_dir, mode="mask"):
+    _style()
+    curves   = results["_curves"]
+    mode_lbl = "Mask" if mode == "mask" else "Box"
+    pages    = [CLASSES[:10], CLASSES[10:]]   # 10 + 9
+
+    for pg, cats in enumerate(pages, 1):
+        rows = 2; cols = 5
+        fig, axes = plt.subplots(rows, cols, figsize=(20, 9))
+        fig.suptitle(
+            f"Precision–Recall Curves — Car Parts [{mode_lbl}]  (Page {pg}/2)\n"
+            f"Solid = IoU 0.50  |  Dashed = IoU 0.55→0.95  |  "
+            f"AP50 = area under solid  |  AP = mean over all IoU thresholds",
+            fontsize=10, color="#C9D1D9", y=1.02,
+        )
+        for i, cat in enumerate(cats):
+            ax = axes[i//cols][i%cols]
+            color = CAT_COLORS[cat]
+
+            # Faint dashed curves for stricter IoU
+            for iou_v in [0.55, 0.65, 0.75, 0.85, 0.95]:
+                key = round(iou_v, 2)
+                if key in curves[cat]:
+                    r2, p2 = curves[cat][key]
+                    ax.plot(r2, p2, color=color, lw=0.8, alpha=0.28, ls="--")
+
+            # Solid at IoU=0.50
+            rec, prec = curves[cat][0.50]
+            ax.fill_between(rec, prec, alpha=0.12, color=color)
+            ax.plot(rec, prec, color=color, lw=2.2,
+                    label=f"AP50={results['_per_cat_ap50'][cat]:.1f}")
+
+            short = cat.replace("_", "\n")
+            ax.set_title(short, fontsize=8, fontweight="bold", color=color)
+            ax.set_xlabel("Recall", fontsize=7)
+            ax.set_ylabel("Precision", fontsize=7)
+            ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
+            ax.tick_params(labelsize=7)
+            ax.legend(fontsize=7, loc="upper right")
+            ax.text(0.03, 0.05,
+                    f"AP={results['per_category'][cat]:.1f}",
+                    transform=ax.transAxes, ha="left", va="bottom",
+                    fontsize=8, color=color, fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="#21262D",
+                              edgecolor=color, alpha=0.7))
+
+        # Hide unused axes on page 2 (last page may have 9 cats, 1 empty slot)
+        for j in range(len(cats), rows*cols):
+            axes[j//cols][j%cols].set_visible(False)
+
+        _savefig(fig, plots_dir / f"pr_curve_{mode}_page{pg}.png")
+
+
+# ── CHART 3 & 4 : F1 vs threshold ────────────────────────────────────────────
+def plot_f1_threshold(preds_by_cat, gts_by_cat, plots_dir, mode="mask"):
+    _style()
+    use_box  = (mode == "box")
+    mode_lbl = "Mask" if mode == "mask" else "Box"
+    thresholds, precs, recs, f1s = compute_f1_sweep(
+        preds_by_cat, gts_by_cat, use_box=use_box)
+
+    best_idx = int(np.argmax(f1s))
+    best_thr = float(thresholds[best_idx])
+    best_f1  = float(f1s[best_idx])
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    ax.plot(thresholds, precs, color="#58A6FF", lw=2.5, label="Precision")
+    ax.plot(thresholds, recs,  color="#3FB950", lw=2.5, label="Recall")
+    ax.plot(thresholds, f1s,   color="#F78166", lw=2.5, label="F1")
+    ax.fill_between(thresholds, f1s, alpha=0.10, color="#F78166")
+    ax.axvline(best_thr, color="#F78166", ls="--", alpha=0.6)
+    ax.scatter([best_thr], [best_f1], color="#F78166", s=90, zorder=5,
+               label=f"Best F1={best_f1:.3f} @ thr={best_thr:.2f}")
+    ax.set_xlabel("Confidence Threshold", fontsize=12)
+    ax.set_ylabel("Score", fontsize=12)
+    ax.set_title(f"Precision / Recall / F1 vs Confidence Threshold  [{mode_lbl}]",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=11)
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1.05)
+    _savefig(fig, plots_dir / f"f1_vs_threshold_{mode}.png")
+    return best_thr, float(precs[best_idx]), float(recs[best_idx]), best_f1
+
+
+# ── CHART 5 & 6 : Per-category horizontal bar (sorted) ───────────────────────
+def plot_ap_per_category(results, plots_dir, mode="mask"):
+    _style()
+    mode_lbl = "Mask" if mode == "mask" else "Box"
+    per_cat  = results["per_category"]
+
+    # Sort descending by AP
+    cats_sorted = sorted(per_cat.keys(), key=lambda c: per_cat[c], reverse=True)
+    vals   = [per_cat[c] for c in cats_sorted]
+    colors = [CAT_COLORS[c] for c in cats_sorted]
+
+    fig, ax = plt.subplots(figsize=(10, 13))
+    bars = ax.barh(range(len(cats_sorted)), vals, color=colors,
+                   alpha=0.85, edgecolor="#30363D", height=0.72)
+    ax.set_yticks(range(len(cats_sorted)))
+    ax.set_yticklabels([c.replace("_", " ") for c in cats_sorted], fontsize=9)
+    ax.set_xlabel(f"{mode_lbl} AP (IoU 0.50:0.95)", fontsize=11)
+    ax.set_xlim(0, 108)
+    ax.set_title(f"Per-Category {mode_lbl} AP  (sorted)  —  RF-DETR Car Parts",
+                 fontsize=12, fontweight="bold")
+
+    # Value labels
+    for bar, val in zip(bars, vals):
+        ax.text(val + 0.8, bar.get_y() + bar.get_height()/2,
+                f"{val:.1f}", va="center", fontsize=8.5,
+                color=colors[cats_sorted.index(
+                    cats_sorted[list(vals).index(val)])])
+
+    # Mean line
+    mean_val = float(np.mean(vals))
+    ax.axvline(mean_val, color="#F78166", ls="--", lw=1.5,
+               label=f"Mean AP = {mean_val:.1f}")
+    ax.legend(fontsize=10)
+    ax.invert_yaxis()
+    _savefig(fig, plots_dir / f"ap_per_category_{mode}.png")
+
+
+# ── CHART 7 : Mask vs Box overall ─────────────────────────────────────────────
+def plot_mask_vs_box_overall(rf_mask, rf_box, plots_dir):
+    _style()
+    metrics   = ["AP", "AP50", "AP75"]
+    mask_vals = [rf_mask["AP"], rf_mask["AP50"], rf_mask["AP75"]]
+    box_vals  = [rf_box["AP"],  rf_box["AP50"],  rf_box["AP75"]]
+
+    x = np.arange(len(metrics)); w = 0.35
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    bars_m = ax.bar(x - w/2, mask_vals, w, label="Mask AP",
+                    color="#1A73E8", alpha=0.88, edgecolor="#30363D")
+    bars_b = ax.bar(x + w/2, box_vals,  w, label="Box AP",
+                    color="#A371F7", alpha=0.88, edgecolor="#30363D")
+
+    for bar, v in zip(bars_m, mask_vals):
+        ax.text(bar.get_x()+bar.get_width()/2, v+0.6,
+                f"{v:.1f}", ha="center", va="bottom",
+                fontsize=12, color="#1A73E8", fontweight="bold")
+    for bar, v in zip(bars_b, box_vals):
+        ax.text(bar.get_x()+bar.get_width()/2, v+0.6,
+                f"{v:.1f}", ha="center", va="bottom",
+                fontsize=12, color="#A371F7", fontweight="bold")
+
+    # Δ between mask and box
+    for i, (m, b) in enumerate(zip(mask_vals, box_vals)):
+        delta = b - m
+        sign  = "+" if delta >= 0 else ""
+        col   = "#3FB950" if delta >= 0 else "#F85149"
+        ax.annotate(f"Δ={sign}{delta:.1f}",
+                    xy=(x[i], max(m, b)+2.5),
+                    ha="center", fontsize=10, color=col, fontweight="bold")
+
+    # IoU note per metric
+    iou_notes = ["IoU 0.50:0.95", "IoU = 0.50", "IoU = 0.75"]
+    for xi, note in zip(x, iou_notes):
+        ax.text(xi, -7, note, ha="center", va="top",
+                fontsize=8, color="#8B949E", style="italic")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(metrics, fontsize=13)
+    ax.set_ylabel("AP Score", fontsize=12)
+    ax.set_ylim(0, 108)
+    ax.set_title("RF-DETR Car Parts  ·  Mask AP vs Box AP  (Overall)",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=11)
+    _savefig(fig, plots_dir / "mask_vs_box_overall.png")
+
+
+# ── CHART 8 : Mask vs Box per category (single page — 19 classes) ─────────────
+def plot_mask_vs_box_per_category(rf_mask, rf_box, plots_dir):
+    _style()
+    mask_vals = [rf_mask["per_category"][c] for c in CLASSES]
+    box_vals  = [rf_box["per_category"][c]  for c in CLASSES]
+
+    x = np.arange(len(CLASSES)); w = 0.38
+    fig, ax = plt.subplots(figsize=(18, 6))
+    bars_m = ax.bar(x - w/2, mask_vals, w, label="Mask AP",
+                    color="#1A73E8", alpha=0.88, edgecolor="#30363D")
+    bars_b = ax.bar(x + w/2, box_vals,  w, label="Box AP",
+                    color="#A371F7", alpha=0.88, edgecolor="#30363D")
+
+    for bar, v in zip(bars_m, mask_vals):
+        ax.text(bar.get_x()+bar.get_width()/2, v+0.7,
+                f"{v:.1f}", ha="center", va="bottom", fontsize=7.5,
+                color="#1A73E8", fontweight="bold")
+    for bar, v in zip(bars_b, box_vals):
+        ax.text(bar.get_x()+bar.get_width()/2, v+0.7,
+                f"{v:.1f}", ha="center", va="bottom", fontsize=7.5,
+                color="#A371F7", fontweight="bold")
+
+    # Δ annotations
+    for i, (m, b) in enumerate(zip(mask_vals, box_vals)):
+        delta = b - m
+        sign  = "+" if delta >= 0 else ""
+        col   = "#3FB950" if delta >= 0 else "#F85149"
+        ax.text(x[i], max(m, b)+3.2, f"{sign}{delta:.1f}",
+                ha="center", fontsize=7, color=col, fontweight="bold")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([c.replace("_", "\n") for c in CLASSES], fontsize=8)
+    ax.set_ylabel("AP (IoU 0.50:0.95)", fontsize=11)
+    ax.set_ylim(0, 115)
+    ax.set_title("RF-DETR Car Parts  ·  Mask AP vs Box AP  per Category",
+                 fontsize=12, fontweight="bold")
+    ax.legend(fontsize=10)
+    ax.text(0.99, 0.98, "Δ = Box − Mask",
+            transform=ax.transAxes, ha="right", va="top",
+            fontsize=9, color="#8B949E")
+    _savefig(fig, plots_dir / "mask_vs_box_per_category.png")
+
+
+# ── CHART 9 : AP vs IoU threshold curve ───────────────────────────────────────
+def plot_iou_ap_curve(rf_mask, rf_box, preds_mask, gts_mask,
+                      preds_box, gts_box, plots_dir):
+    _style()
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+
+    for preds_by_cat, gts_by_cat, color, label, use_box in [
+        (preds_mask, gts_mask, "#1A73E8", "RF-DETR Mask", False),
+        (preds_box,  gts_box,  "#A371F7", "RF-DETR Box",  True),
+    ]:
+        ap_per_iou = []
+        for iou in IOU_THRESHOLDS:
+            aps = []
+            for cat in CLASSES:
+                v, _, _ = ap_and_curve(preds_by_cat.get(cat, []),
+                                       gts_by_cat.get(cat, []), iou, use_box)
+                aps.append(v)
+            ap_per_iou.append(float(np.mean(aps)))
+
+        ax.plot(IOU_THRESHOLDS, ap_per_iou, color=color, lw=2.5,
+                marker="o", markersize=5, label=label)
+        ax.fill_between(IOU_THRESHOLDS, ap_per_iou, alpha=0.10, color=color)
+
+    ax.set_xlabel("IoU Threshold", fontsize=12)
+    ax.set_ylabel("Mean AP across 19 categories", fontsize=12)
+    ax.set_title("AP vs IoU Threshold  —  RF-DETR Car Parts  (Mask vs Box)",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=11)
+    ax.set_xlim(0.48, 0.97)
+    _savefig(fig, plots_dir / "iou_ap_curve.png")
+
+
+# ── CHART 11 : AP50 vs AP75 grouped bar per category ─────────────────────────
+def plot_ap50_ap75_bar(rf_mask, plots_dir):
+    """
+    For each category show two bars side by side:
+      Blue  = AP50  (how well model detects parts at relaxed IoU=0.50)
+      Green = AP75  (how well model detects parts at strict  IoU=0.75)
+    A large gap between the two bars means the model finds the part
+    but the mask shape is imprecise. A small gap means tight masks.
+    """
+    _style()
+    ap50_vals = [rf_mask["_per_cat_ap50"][c] for c in CLASSES]
+    ap75_vals = [rf_mask["_per_cat_ap75"][c] for c in CLASSES]
+
+    x = np.arange(len(CLASSES)); w = 0.38
+    fig, ax = plt.subplots(figsize=(18, 6))
+
+    bars50 = ax.bar(x - w/2, ap50_vals, w, label="AP50  (IoU ≥ 0.50)",
+                    color="#1A73E8", alpha=0.88, edgecolor="#30363D")
+    bars75 = ax.bar(x + w/2, ap75_vals, w, label="AP75  (IoU ≥ 0.75)",
+                    color="#3FB950", alpha=0.88, edgecolor="#30363D")
+
+    for bar, v in zip(bars50, ap50_vals):
+        if v > 1:
+            ax.text(bar.get_x()+bar.get_width()/2, v+0.8,
+                    f"{v:.1f}", ha="center", va="bottom",
+                    fontsize=8, color="#1A73E8", fontweight="bold")
+    for bar, v in zip(bars75, ap75_vals):
+        if v > 1:
+            ax.text(bar.get_x()+bar.get_width()/2, v+0.8,
+                    f"{v:.1f}", ha="center", va="bottom",
+                    fontsize=8, color="#3FB950", fontweight="bold")
+
+    # Gap annotation: AP50 − AP75 (mask quality drop)
+    for i, (v50, v75) in enumerate(zip(ap50_vals, ap75_vals)):
+        gap = v50 - v75
+        col = "#F85149" if gap > 20 else ("#F78166" if gap > 10 else "#8B949E")
+        ax.text(x[i], max(v50, v75) + 3.5, f"↓{gap:.0f}",
+                ha="center", fontsize=7.5, color=col, fontweight="bold")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([c.replace("_", " ") for c in CLASSES],
+                       rotation=35, ha="right", fontsize=8.5)
+    ax.set_ylabel("AP Score", fontsize=12)
+    ax.set_ylim(0, 115)
+    ax.set_title(
+        "AP50 vs AP75 per Category  —  RF-DETR Car Parts  [Mask]\n"
+        "↓ number = drop from AP50→AP75  "
+        "(red = large drop → imprecise mask shape,  grey = small drop → tight masks)",
+        fontsize=11, fontweight="bold")
+    ax.legend(fontsize=11)
+    _savefig(fig, plots_dir / "ap50_ap75_bar.png")
+
+
+# ── CHART 12 : Confusion heatmap ──────────────────────────────────────────────
+def plot_confusion_heatmap(preds_by_cat, gts_by_cat, plots_dir):
+    _style()
+    n = len(CLASSES)
+    cat2idx = {c: i for i, c in enumerate(CLASSES)}
+    mat = np.zeros((n, n), dtype=int)
+
+    for cat in CLASSES:
+        preds = preds_by_cat.get(cat, [])
+        gts   = gts_by_cat.get(cat, [])
+        if not gts:
+            continue
+        gt_by_img = defaultdict(list)
+        for i, g in enumerate(gts):
+            gt_by_img[g["image_id"]].append((i, g))
+        preds_s = sorted(preds, key=lambda x: -x["score"])
+        matched = set()
+        for pred in preds_s:
+            best = 0.50 - 1e-9; best_gi = -1
+            for gi, g in gt_by_img.get(pred["image_id"], []):
+                if gi in matched: continue
+                iou = maskUtils.iou([pred["mask"]], [g["mask"]], [0])[0][0]
+                if iou > best: best = iou; best_gi = gi
+            if best_gi >= 0:
+                mat[cat2idx[cat], cat2idx[cat]] += 1
+                matched.add(best_gi)
+
+    gt_counts = np.array([len(gts_by_cat.get(c, [])) for c in CLASSES], dtype=float)
+    gt_counts[gt_counts == 0] = 1
+    mat_norm = mat / gt_counts[:, None]
+
+    short = [c.replace("_", " ").replace("Left ", "L.").replace("Right ", "R.")
+             for c in CLASSES]
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+    im = ax.imshow(mat_norm, cmap="YlOrRd", vmin=0, vmax=1, aspect="auto")
+    plt.colorbar(im, ax=ax, label="TP rate (fraction of GT matched)")
+    ax.set_xticks(range(n)); ax.set_yticks(range(n))
+    ax.set_xticklabels(short, rotation=45, ha="right", fontsize=7)
+    ax.set_yticklabels(short, fontsize=7)
+    ax.set_xlabel("Predicted Category", fontsize=10)
+    ax.set_ylabel("Ground-Truth Category", fontsize=10)
+    ax.set_title("Detection Heatmap (TP rate per GT class)  [Mask @IoU=0.50]\nRF-DETR Car Parts",
+                 fontsize=12, fontweight="bold")
+    for i in range(n):
+        for j in range(n):
+            v = mat_norm[i, j]
+            if v > 0.01:
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                        fontsize=6, color="black" if v > 0.5 else "white")
+    _savefig(fig, plots_dir / "confusion_heatmap_mask.png", tight=False)
+
+
+# ── INFERENCE ─────────────────────────────────────────────────────────────────
+def run_inference(model, img_path, threshold, classes):
+    img_pil = Image.open(img_path).convert("RGB")
+    W, H = img_pil.size
+    det = model.predict(img_pil, threshold=threshold)
+    if det is None or len(det) == 0:
+        return []
+    indices = np.argsort(-det.confidence)[:300]
+    results = []
+    for idx in indices:
+        cid   = int(det.class_id[idx])
+        name  = classes[cid] if 0 <= cid < len(classes) else f"cls_{cid}"
+        score = float(det.confidence[idx])
+
+        if det.mask is not None:
+            full_mask = pred_mask_to_full(det.mask[idx].astype(bool), H, W)
+        else:
+            x1, y1, x2, y2 = (int(v) for v in det.xyxy[idx])
+            full_mask = np.zeros((H, W), dtype=np.uint8)
+            full_mask[max(0,y1):min(H,y2), max(0,x1):min(W,x2)] = 1
+
+        rle = maskUtils.encode(np.asfortranarray(full_mask.astype(np.uint8)))
+        rle["counts"] = rle["counts"].decode("utf-8")
+
+        bbox_from_mask = mask_to_bbox(full_mask)
+        if bbox_from_mask is not None:
+            bbox = bbox_from_mask
+        else:
+            x1, y1, x2, y2 = (float(v) for v in det.xyxy[idx])
+            bbox = (x1, y1, x2, y2)
+
+        results.append({"class_name": name, "score": score,
+                        "mask": rle, "bbox": bbox})
+    del det
+    return results
+
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--images_dir",  default=IMAGES_DIR)
+    p.add_argument("--annotations", default=ANNOTATIONS)
+    p.add_argument("--checkpoint",  default=CHECKPOINT)
+    p.add_argument("--resolution",  type=int,   default=RESOLUTION)
+    p.add_argument("--threshold",   type=float, default=THRESHOLD)
+    p.add_argument("--output_json", default=OUTPUT_JSON)
+    p.add_argument("--plots_dir",   default=PLOTS_DIR)
+    return p.parse_args()
+
+
