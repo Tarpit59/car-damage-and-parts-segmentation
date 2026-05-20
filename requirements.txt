@@ -1,0 +1,14 @@
+flask>=3.0.0
+opencv-python>=4.9.0
+numpy>=1.26.0
+pillow>=10.2.0
+ultralytics==8.4.46
+supervision==0.27.0
+werkzeug>=3.0.0
+rfdetr==1.6.1
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
