@@ -557,7 +557,7 @@ Each sub-directory has its own `README.md` with full metric tables, per-category
 
 ## User Interface
 
-![App UI](https://github.com/Tarpit59/car-damage-and-parts-segmentation/blob/master/base/static/UI_Image/UI_Screenshot.png)
+![App UI](https://github.com/Tarpit59/car-damage-and-parts-segmentation/blob/main/base/static/UI_Image/UI_Screenshot.png)
 
 
 ## Acknowledgements
