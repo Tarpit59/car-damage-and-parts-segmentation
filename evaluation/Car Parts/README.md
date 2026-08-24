@@ -1,6 +1,6 @@
 # Car Parts — Model Evaluation
 
-Evaluation of the **RF-DETR-Seg-Medium** model trained for **19-class car part instance segmentation**. Unlike the damage model, there is no published external baseline — all charts are self-contained RF-DETR metrics.
+Evaluation of the **RF-DETR-Seg-Nano** model trained for **19-class car part instance segmentation**. Unlike the damage model, there is no published external baseline — all charts are self-contained RF-DETR metrics.
 
 ---
 
@@ -10,7 +10,7 @@ Evaluation of the **RF-DETR-Seg-Medium** model trained for **19-class car part i
 
 | Item | Description |
 |------|-------------|
-| `checkpoint_best_total.pth` | Trained RF-DETR-Seg-Medium car parts model |
+| `checkpoint_best_total.pth` | Trained RF-DETR-Seg-Nano car parts model |
 | Car Parts test set | 540 images · 4,591 annotations · 19 part classes |
 | `metrics.csv` | Raw training log |
 
@@ -83,7 +83,7 @@ Evaluation of the **RF-DETR-Seg-Medium** model trained for **19-class car part i
 Car Parts/
 ├── Testing/
 │   ├── evaluate_rfdetr_carparts.py     ← Full test-set evaluation script
-│   └── plots_parts/                    ← Generated evaluation charts + results JSON
+│   └── plots_parts/                    ← Main evaluation results (12 charts + JSON)
 │       ├── rfdetr_carparts_results.json
 │       ├── ap_per_category_mask.png
 │       ├── ap_per_category_box.png
@@ -96,7 +96,6 @@ Car Parts/
 │       ├── pr_curve_box_page2.png
 │       ├── f1_vs_threshold_mask.png
 │       ├── f1_vs_threshold_box.png
-│       ├── iou_ap_curve.png
 │       └── confusion_heatmap_mask.png
 │
 └── Training and Validation/
@@ -124,52 +123,150 @@ Car Parts/
 
 ### Script: `Testing/evaluate_rfdetr_carparts.py`
 
-Runs the trained RF-DETR model against the Car Parts test split and computes full COCO-style AP metrics for both instance segmentation (mask) and bounding box (box) detection across all 19 classes.
+Runs the trained RF-DETR model against the Car Parts test split and computes full COCO-standard AP metrics for both instance segmentation (mask) and bounding box (box) detection across all 19 classes. All metrics are evaluated using `pycocotools.cocoeval.COCOeval`.
+
+---
+
+### 🔬 Evaluation Methodology
+
+#### Coordinate Projection
+
+The RF-DETR model infers at a configured resolution (960 px) which may differ from the original image dimensions. To ensure correct IoU computation, all model predictions are **projected back to original image coordinates** before evaluation:
+
+- **Mask projection:** The model's output mask is resized to original image dimensions using **bilinear interpolation** followed by a **0.5 threshold** binarisation. The resulting binary mask is RLE-encoded for COCO evaluation.
+- **Bounding box derivation:** Bounding boxes are derived as the **tight bounding box of the projected mask** rather than directly scaling the model's box predictions, ensuring pixel-exact consistency between mask and box.
+
+#### Area Range Configuration (APs / APm / APl)
+
+Unlike the Car Damage evaluation (which uses the CarDD paper's non-standard area ranges), the Car Parts evaluation uses **COCO standard area ranges**:
+
+| Size Category | COCO Standard (used here) | CarDD (used for damage) |
+|---------------|--------------------------|------------------------|
+| **Small** | area < 32² | area < 128² |
+| **Medium** | 32² ≤ area < 96² | 128² ≤ area < 256² |
+| **Large** | area ≥ 96² | area ≥ 256² |
+
+This means APs / APm / APl values are **not directly comparable** between the Car Damage and Car Parts evaluations due to the different area range definitions. The COCO standard ranges classify objects at much smaller thresholds, which explains the lower APs / APm values for car parts — most car parts are large-scale objects that fall entirely in the "large" category under COCO's definition.
+
+#### Evaluator
+
+All headline AP metrics are computed using **`pycocotools.cocoeval.COCOeval`** — the standard COCO evaluation library — with default parameters (10 IoU thresholds from 0.50 to 0.95, 101-point precision interpolation, max 100 detections per image).
+
+---
+
+### 🔄 Evaluation Flow
+
+```
+1. Load COCO annotations
+   └─ Provides image file list, GT masks/boxes, category mappings
+
+2. Decode all GT masks from annotations
+   └─ Polygon → binary mask → RLE (in original coordinates)
+
+3. Load RF-DETR-Seg-Nano model checkpoint
+
+4. For each test image (540 images):
+   ├─ 4a. Resolve image file path (with Roboflow filename fallback)
+   ├─ 4b. Run model inference → raw masks at model resolution
+   ├─ 4c. Project masks to original coordinates (bilinear + 0.5 threshold)
+   ├─ 4d. Derive bounding boxes from projected masks (tight bbox)
+   └─ 4e. Build COCO-format result entries (segm + bbox)
+
+5. Run pycocotools COCOeval
+   ├─ iouType = "segm" → Mask AP / AP50 / AP75 / APs / APm / APl
+   └─ iouType = "bbox" → Box AP / AP50 / AP75 / APs / APm / APl
+
+6. Per-category evaluation (19 categories × 2 iouTypes)
+   └─ Extract per-category AP, AP50, AP75 + PR curve data
+
+7. Compute threshold-dependent metrics
+   └─ F1 / Precision / Recall vs confidence threshold sweep (50 steps)
+
+8. Generate 12 evaluation charts + save full results JSON
+```
+
+---
 
 ### 📈 Results
 
 **Dataset:** Car Parts test split — **540 images, 4,591 annotations, 19 categories**
+**Evaluator:** `pycocotools.cocoeval.COCOeval` in original image coordinates
+**Area ranges:** COCO standard (small < 32², medium 32²–96², large ≥ 96²)
 
 #### Overall Metrics
 
+| Metric | Mask | Box | Δ (Box − Mask) |
+|--------|------|-----|----------------|
+| **AP** (IoU 0.50:0.95) | **62.1** | **64.1** | +2.0 |
+| **AP50** | **85.0** | **86.2** | +1.2 |
+| **AP75** | **68.0** | **70.8** | +2.8 |
+
+#### Size-Stratified AP (COCO Standard Area Ranges)
+
 | Metric | Mask | Box |
 |--------|------|-----|
-| **AP** (IoU 0.50:0.95) | **62.3** | **64.3** |
-| **AP50** | **85.4** | **86.6** |
-| **AP75** | **68.2** | **71.0** |
+| **APs** (small, area < 32²) | 3.5 | 12.9 |
+| **APm** (medium, 32² ≤ area < 96²) | 17.3 | 26.2 |
+| **APl** (large, area ≥ 96²) | 66.0 | 66.4 |
+
+> **Note:** Under COCO standard area ranges, most car parts are classified as "large" objects (area ≥ 96² = 9,216 px²). The low APs and APm values reflect the rarity of very small car part instances in the dataset, not poor model performance on small objects.
 
 #### Best Threshold (F1)
 
 | Mode | Threshold | Precision | Recall | F1 |
-|------|-----------|-----------|--------|----|
-| Mask | 0.469 | 0.865 | 0.868 | **0.867** |
-| Box | 0.469 | 0.867 | 0.870 | **0.868** |
+|------|-----------|-----------|--------|-----|
+| Mask | 0.469 | 0.8650 | 0.8684 | **0.8667** |
+| Box | 0.469 | 0.8666 | 0.8700 | **0.8683** |
 
 #### Per-Category Mask AP (sorted high → low)
 
 | Class | Mask AP | Mask AP50 | Mask AP75 |
-|-------|---------|-----------|-----------|
-| Front_Windshield_Glass | **90.1** | 99.0 | 98.2 |
-| Hood_Bonnet | **87.3** | 98.0 | 95.6 |
-| Front_Bumper | **85.0** | 97.5 | 92.2 |
-| Front_Door | **80.4** | 96.9 | 92.9 |
-| Diggi_Back_Door_Glass | **79.1** | 95.9 | 88.8 |
-| Rear_Bumper | **75.7** | 93.9 | 84.1 |
-| Rear_Door | **73.0** | 93.2 | 85.0 |
-| Headlight | **70.0** | 94.1 | 79.9 |
-| Diggi_Back_Door | **66.2** | 83.5 | 67.7 |
-| Taillight | **65.0** | 89.9 | 72.5 |
-| Fender | **59.5** | 89.2 | 69.5 |
-| tyre | **59.0** | 85.0 | 68.0 |
-| Rear_Door_Glass | **53.9** | 86.1 | 56.6 |
-| Front_Door_Glass | **51.2** | 82.8 | 52.6 |
-| Grill | **49.2** | 73.8 | 60.3 |
-| Side_Mirror | **56.8** | 87.4 | 68.1 |
-| Quarter_Panel | **36.0** | 58.1 | 37.0 |
-| Roof | **27.3** | 63.3 | 18.9 |
-| Running_Board | **19.5** | 54.9 | 7.6 |
+|-------|---------|-----------|-----------| 
+| Front_Windshield_Glass | **89.8** | 98.5 | 97.8 |
+| Hood_Bonnet | **87.0** | 97.7 | 95.0 |
+| Front_Bumper | **84.7** | 97.2 | 91.8 |
+| Front_Door | **80.1** | 96.5 | 92.4 |
+| Diggi_Back_Door_Glass | **78.8** | 95.4 | 88.5 |
+| Rear_Bumper | **75.4** | 93.5 | 83.9 |
+| Rear_Door | **72.7** | 92.6 | 84.8 |
+| Headlight | **69.8** | 93.7 | 79.6 |
+| Diggi_Back_Door | **65.9** | 82.9 | 67.3 |
+| Taillight | **64.9** | 89.3 | 72.4 |
+| Fender | **59.4** | 88.8 | 69.2 |
+| tyre | **58.8** | 84.7 | 67.6 |
+| Side_Mirror | **56.6** | 87.1 | 67.8 |
+| Rear_Door_Glass | **53.7** | 85.7 | 56.2 |
+| Front_Door_Glass | **51.0** | 82.3 | 52.5 |
+| Grill | **49.1** | 73.4 | 60.1 |
+| Quarter_Panel | **36.1** | 58.0 | 37.2 |
+| Roof | **27.4** | 63.2 | 19.3 |
+| Running_Board | **19.6** | 54.7 | 7.9 |
 
 > **Note:** Roof and Running_Board have lower AP because they are rarely fully visible and overlap significantly with adjacent panels.
+
+#### Per-Category Box AP (sorted high → low)
+
+| Class | Box AP | Box AP50 | Box AP75 |
+|-------|--------|----------|----------|
+| Front_Windshield_Glass | **88.8** | 98.5 | 97.8 |
+| Hood_Bonnet | **86.0** | 97.9 | 96.2 |
+| Front_Bumper | **85.8** | 97.2 | 95.0 |
+| Diggi_Back_Door_Glass | **80.2** | 93.3 | 88.5 |
+| Rear_Bumper | **79.3** | 95.0 | 85.1 |
+| Front_Door | **78.9** | 96.7 | 91.3 |
+| Rear_Door | **75.9** | 93.4 | 87.1 |
+| Headlight | **70.8** | 94.2 | 81.4 |
+| Diggi_Back_Door | **67.5** | 87.0 | 69.9 |
+| Taillight | **66.2** | 87.5 | 75.1 |
+| Fender | **59.8** | 89.2 | 66.4 |
+| tyre | **56.1** | 83.3 | 63.4 |
+| Front_Door_Glass | **54.2** | 83.4 | 59.2 |
+| Rear_Door_Glass | **54.3** | 86.5 | 61.8 |
+| Grill | **53.6** | 76.0 | 62.9 |
+| Side_Mirror | **49.2** | 87.4 | 51.5 |
+| Running_Board | **44.2** | 67.6 | 49.1 |
+| Quarter_Panel | **36.2** | 58.4 | 39.0 |
+| Roof | **30.8** | 65.9 | 23.9 |
 
 ### Usage
 
@@ -196,21 +293,20 @@ python Testing/evaluate_rfdetr_carparts.py \
 | `--output_json` | `rfdetr_carparts_results.json` | Output JSON with all metrics |
 | `--plots_dir` | `./plots_parts` | Output directory for charts |
 
-### Generated Charts (13 total)
+### Generated Charts (12 total)
 
 | # | File | Description |
 |---|------|-------------|
-| 1–2 | `pr_curve_mask_page1/2.png` | PR curves per class — mask (2 pages, 10+9 categories) |
-| 3–4 | `pr_curve_box_page1/2.png` | PR curves per class — box |
-| 5 | `f1_vs_threshold_mask.png` | F1 / P / R vs confidence threshold (mask) |
-| 6 | `f1_vs_threshold_box.png` | F1 / P / R vs confidence threshold (box) |
-| 7 | `ap_per_category_mask.png` | Horizontal bar — per-class mask AP (sorted) |
-| 8 | `ap_per_category_box.png` | Horizontal bar — per-class box AP (sorted) |
-| 9 | `mask_vs_box_overall.png` | Grouped bar — Mask vs Box for AP / AP50 / AP75 |
-| 10 | `mask_vs_box_per_category.png` | Grouped bar — Mask vs Box per category |
-| 11 | `iou_ap_curve.png` | Mean AP vs IoU threshold (0.50 → 0.95) |
-| 12 | `ap50_ap75_bar.png` | AP50 vs AP75 per category — gap shows mask precision |
-| 13 | `confusion_heatmap_mask.png` | TP-rate heatmap per GT class (mask @ IoU=0.50) |
+| 1–2 | `pr_curve_mask_page1/2.png` | Per-category Precision–Recall curves — mask (2 pages, 10+9 categories). Solid = IoU 0.50, dashed = IoU 0.55–0.95. |
+| 3–4 | `pr_curve_box_page1/2.png` | Per-category Precision–Recall curves — box |
+| 5 | `f1_vs_threshold_mask.png` | F1 / Precision / Recall vs confidence threshold (mask) |
+| 6 | `f1_vs_threshold_box.png` | F1 / Precision / Recall vs confidence threshold (box) |
+| 7 | `ap_per_category_mask.png` | Horizontal bar chart — per-class mask AP (sorted descending) with mean line |
+| 8 | `ap_per_category_box.png` | Horizontal bar chart — per-class box AP (sorted descending) with mean line |
+| 9 | `mask_vs_box_overall.png` | Grouped bar — Mask vs Box for AP / AP50 / AP75 with Δ annotations |
+| 10 | `mask_vs_box_per_category.png` | Grouped bar — Mask vs Box per category with Δ annotations |
+| 11 | `ap50_ap75_bar.png` | AP50 vs AP75 per category — gap (↓) indicates mask shape precision |
+| 12 | `confusion_heatmap_mask.png` | TP-rate heatmap per GT class (mask @ IoU=0.50) |
 
 ---
 
@@ -265,5 +361,5 @@ pip install -r requirements.txt
 ## 📖 References
 
 - **RF-DETR:** [Roboflow RF-DETR — Real-Time Detection Transformer](https://github.com/roboflow/rf-detr)
-- **Evaluation metric standard:** COCO-style AP (IoU=0.50:0.95, 101-point interpolation) computed using a custom evaluation script (not pycocotools).
+- **Evaluation standard:** COCO-style AP (IoU=0.50:0.95, 101-point interpolation) computed using `pycocotools.cocoeval.COCOeval` with COCO standard area ranges.
 - **Dataset annotation format:** COCO JSON with polygon segmentation masks

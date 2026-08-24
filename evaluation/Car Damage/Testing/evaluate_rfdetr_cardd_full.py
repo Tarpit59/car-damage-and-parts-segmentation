@@ -50,12 +50,12 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from pycocotools import mask as maskUtils
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
+import cv2
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.gridspec import GridSpec
-import matplotlib.colors as mcolors
 
 # ── DEFAULTS ─────────────────────────────────────────────────────────────────
 IMAGES_DIR  = "/path/to/test/images"
@@ -149,7 +149,61 @@ def mask_to_bbox(mask_bool):
         return None
     y1, y2 = np.where(rows)[0][[0, -1]]
     x1, x2 = np.where(cols)[0][[0, -1]]
-    return float(x1), float(y1), float(x2), float(y2)
+    return float(x1), float(y1), float(x2 + 1), float(y2 + 1)
+
+
+def project_prediction_to_original(mask_model, orig_w, orig_h):
+    """
+    Resize a mask from the model's inference space to the original image
+    coordinate space using bilinear interpolation + 0.5 threshold.
+
+    Parameters
+    ----------
+    mask_model : np.ndarray   — boolean or uint8 mask at model output resolution
+    orig_w, orig_h : int      — original image width and height
+
+    Returns
+    -------
+    rle       : dict    — COCO RLE dict with size=[orig_h, orig_w]
+    mask_orig : uint8   — binary mask at shape (orig_h, orig_w)
+    """
+    mask_float   = mask_model.astype(np.float32)
+    mask_resized = cv2.resize(mask_float, (orig_w, orig_h),
+                              interpolation=cv2.INTER_LINEAR)
+    mask_orig    = (mask_resized >= 0.5).astype(np.uint8)
+
+    rle = maskUtils.encode(np.asfortranarray(mask_orig))
+    rle["counts"] = rle["counts"].decode("utf-8")
+    rle["size"]   = [orig_h, orig_w]
+    return rle, mask_orig
+
+
+def decode_roboflow_filename(fname: str) -> str:
+    """
+    Recover the ORIGINAL filename from a Roboflow-exported filename.
+
+    Roboflow renames files on export using the pattern:
+        {original_stem}_{original_ext}.rf.{32_char_md5}.{export_ext}
+
+    Examples
+    --------
+    '003283_jpg.rf.b013652adf93f662a5d15f8eb7bf3e8d.jpg'  →  '003283.jpg'
+    'img_001_png.rf.abcdef1234567890abcdef1234567890.jpg'  →  'img_001.png'
+    'normal_name.jpg'                                      →  'normal_name.jpg'  (unchanged)
+
+    Returns the decoded filename, or fname unchanged if the pattern does not match.
+    """
+    import re as _re
+    _RF = _re.compile(
+        r'^(.+?)_(jpe?g|png|bmp|tiff?)\.rf\.[a-f0-9]{32}\.(jpe?g|png|bmp|tiff?)$',
+        _re.IGNORECASE,
+    )
+    m = _RF.match(fname)
+    if m:
+        orig_stem = m.group(1)
+        orig_ext  = m.group(2).lower().replace("jpeg", "jpg")
+        return f"{orig_stem}.{orig_ext}"
+    return fname
 
 
 def box_iou(b1, b2):
@@ -166,115 +220,91 @@ def box_iou(b1, b2):
     union = a1 + a2 - inter
     return inter / union if union > 0 else 0.0
 
-# ── AP ENGINE ─────────────────────────────────────────────────────────────────
+# ── COCOEVAL ────────────────────────────────────────────────────────
 
-def ap_101point(recalls, precisions):
-    r = np.concatenate(([0.0], recalls,    [1.0]))
-    p = np.concatenate(([0.0], precisions, [0.0]))
-    for i in range(len(p)-2, -1, -1):
-        p[i] = max(p[i], p[i+1])
-    idx = np.where(r[1:] != r[:-1])[0]
-    return float(np.sum((r[idx+1]-r[idx]) * p[idx+1]))
-
-
-def _match_preds_gts(preds_sorted, gt_by_img, iou_thresh, use_box=False):
-    """Return (tp, fp, n_gt, recalls, precisions, matched_cat_ids)."""
-    tp = np.zeros(len(preds_sorted))
-    fp = np.zeros(len(preds_sorted))
-    matched_gts = set()
-    matched_cats = []   # (pred_cat, gt_cat) for confusion matrix
-
-    for pi, pred in enumerate(preds_sorted):
-        best_iou = iou_thresh - 1e-9
-        best_gi  = -1
-        best_gt_cat = None
-
-        for gi, g in gt_by_img.get(pred["image_id"], []):
-            if gi in matched_gts:
-                continue
-            if use_box:
-                iou = box_iou(pred["bbox"], g["bbox"])
-            else:
-                iou = maskUtils.iou([pred["mask"]], [g["mask"]], [0])[0][0]
-            if iou > best_iou:
-                best_iou = iou
-                best_gi  = gi
-                best_gt_cat = g.get("cat", pred["cat"])
-
-        if best_gi >= 0:
-            tp[pi] = 1
-            matched_gts.add(best_gi)
-            matched_cats.append((pred["cat"], best_gt_cat))
-        else:
-            fp[pi] = 1
-            matched_cats.append((pred["cat"], None))
-
-    return tp, fp, matched_cats
-
-
-def ap_and_curve(preds, gts, iou_thresh, use_box=False):
+def run_cocoeval(coco_gt, coco_results_list, iou_type, label="RF-DETR"):
     """
-    Returns (AP, recalls_array, precisions_array).
+    Run pycocotools COCOeval on projected predictions.
+
+    Parameters
+    ----------
+    coco_gt           : pycocotools.coco.COCO  — ground-truth COCO object
+    coco_results_list : list of dicts          — COCO-format detection results
+    iou_type          : str                    — "segm" or "bbox"
+    label             : str                    — display label for logging
+
+    Returns
+    -------
+    dict with keys AP, AP50, AP75, per_category (name → AP×100);
+    empty dict if no predictions were available.
     """
-    if not preds or not gts:
-        return 0.0, np.array([0.0]), np.array([0.0])
+    if not coco_results_list:
+        print(f"[WARN] No predictions for {iou_type} eval — skipping.")
+        return {}
 
-    gt_by_img = defaultdict(list)
-    for i, g in enumerate(gts):
-        gt_by_img[g["image_id"]].append((i, g))
+    coco_dt = coco_gt.loadRes(coco_results_list)
+    ev = COCOeval(coco_gt, coco_dt, iou_type)
+    # CarDD paper uses non-standard area ranges: small < 128², medium 128²-256², large > 256²
+    ev.params.areaRng = [[0, 1e5 ** 2], [0, 128 ** 2], [128 ** 2, 256 ** 2], [256 ** 2, 1e5 ** 2]]
+    ev.evaluate()
+    ev.accumulate()
+    print(f"\n── Pycocotools  [{label}  iouType={iou_type}] ──")
+    ev.summarize()
 
-    preds_sorted = sorted(preds, key=lambda x: -x["score"])
-    tp, fp, _ = _match_preds_gts(preds_sorted, gt_by_img, iou_thresh, use_box)
-
-    n_gt = len(gts)
-    tp_cum = np.cumsum(tp)
-    fp_cum = np.cumsum(fp)
-    recalls    = tp_cum / (n_gt + 1e-6)
-    precisions = tp_cum / (tp_cum + fp_cum + 1e-6)
-    ap = ap_101point(recalls, precisions) * 100.0
-    return ap, recalls, precisions
-
-
-def compute_metrics(preds_by_cat, gts_by_cat, use_box=False):
-    """Compute AP, AP50, AP75, per-category AP and raw PR curves."""
-    per_cat_ap   = {}
-    per_cat_ap50 = {}
-    per_cat_ap75 = {}
-    curves = {}   # cat → {iou → (recalls, precisions)}
-
-    for cat in CLASSES:
-        preds = preds_by_cat.get(cat, [])
-        gts   = gts_by_cat.get(cat, [])
-
-        aps_all = []
-        cat_curves = {}
-        for iou in IOU_THRESHOLDS:
-            ap_val, rec, prec = ap_and_curve(preds, gts, iou, use_box)
-            aps_all.append(ap_val)
-            cat_curves[round(float(iou), 2)] = (rec, prec)
-
-        per_cat_ap[cat]   = float(np.mean(aps_all))
-        per_cat_ap50[cat] = cat_curves[0.50][0], cat_curves[0.50][1]  # will be overwritten below
-        per_cat_ap75[cat] = cat_curves[0.75]
-        curves[cat] = cat_curves
-
-        # Scalar AP50 / AP75
-        per_cat_ap50[cat] = ap_and_curve(preds, gts, 0.50, use_box)[0]
-        per_cat_ap75[cat] = ap_and_curve(preds, gts, 0.75, use_box)[0]
-
-    AP   = float(np.mean(list(per_cat_ap.values())))
-    AP50 = float(np.mean(list(per_cat_ap50.values())))
-    AP75 = float(np.mean(list(per_cat_ap75.values())))
-
-    return {
-        "AP":           round(AP,   1),
-        "AP50":         round(AP50, 1),
-        "AP75":         round(AP75, 1),
-        "per_category": {c: round(v, 1) for c, v in per_cat_ap.items()},
-        "_per_cat_ap50": per_cat_ap50,
-        "_per_cat_ap75": per_cat_ap75,
-        "_curves":       curves,
+    stats  = ev.stats   # [AP, AP50, AP75, APs, APm, APl, ...]
+    result = {
+        "AP":           round(float(stats[0]) * 100, 1),
+        "AP50":         round(float(stats[1]) * 100, 1),
+        "AP75":         round(float(stats[2]) * 100, 1),
+        "APs":          round(float(stats[3]) * 100, 1) if stats[3] != -1 else 0.0,
+        "APm":          round(float(stats[4]) * 100, 1) if stats[4] != -1 else 0.0,
+        "APl":          round(float(stats[5]) * 100, 1) if stats[5] != -1 else 0.0,
+        "per_category": {},
+        "_per_cat_ap50": {},
+        "_per_cat_ap75": {},
+        "_curves": {},
     }
+
+    # Per-category AP (mean over IoU 0.50:0.95)
+    for cat_id, cat_info in coco_gt.cats.items():
+        cname = cat_info["name"]
+        ev2 = COCOeval(coco_gt, coco_dt, iou_type)
+        ev2.params.catIds = [cat_id]
+        # CarDD paper uses non-standard area ranges
+        ev2.params.areaRng = [[0, 1e5 ** 2], [0, 128 ** 2], [128 ** 2, 256 ** 2], [256 ** 2, 1e5 ** 2]]
+        ev2.evaluate()
+        ev2.accumulate()
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            ev2.summarize()
+            
+        if len(ev2.stats) > 0 and ev2.stats[0] != -1:
+            result["per_category"][cname]  = round(float(ev2.stats[0]) * 100, 1)
+            result["_per_cat_ap50"][cname] = round(float(ev2.stats[1]) * 100, 1)
+            result["_per_cat_ap75"][cname] = round(float(ev2.stats[2]) * 100, 1)
+            
+            # Extract PR curves directly from pycocotools evaluation
+            recalls = ev2.params.recThrs
+            cat_curves = {}
+            # T (iou) x R (recall) x K (cat) x A (area) x M (maxDets)
+            precisions = ev2.eval["precision"]
+            for t_idx, iou_v in enumerate(np.arange(0.50, 1.00, 0.05)):
+                key = round(float(iou_v), 2)
+                # T=t_idx, R=all, K=0 (only 1 cat evaluated), A=0 (all area), M=2 (maxDets=100)
+                prec = precisions[t_idx, :, 0, 0, 2]
+                valid = prec > -1
+                if valid.any():
+                    cat_curves[key] = (recalls[valid], prec[valid])
+                else:
+                    cat_curves[key] = (np.array([0.0]), np.array([0.0]))
+            result["_curves"][cname] = cat_curves
+        else:
+            result["per_category"][cname]  = 0.0
+            result["_per_cat_ap50"][cname] = 0.0
+            result["_per_cat_ap75"][cname] = 0.0
+            result["_curves"][cname] = {round(v, 2): (np.array([0.0]), np.array([0.0])) for v in np.arange(0.50, 1.00, 0.05)}
+
+    return result
 
 
 def compute_f1_vs_threshold(preds_by_cat, gts_by_cat, use_box=False, n_steps=50):
@@ -881,97 +911,165 @@ def plot_comparison_per_category_mask_box(rf_mask, rf_box, plots_dir):
     _savefig(fig, plots_dir / "comparison_per_category_mask_box.png")
 
 
+
 # ── PRINT TABLE ───────────────────────────────────────────────────────────────
 
-def print_table(rf_mask, rf_box):
-    SEP = "=" * 72
+def print_table(mask_results, box_results):
+    SEP = "=" * 92
 
-    for mode, rf, label in [("mask", rf_mask, "Mask AP"), ("box", rf_box, "Box AP (APbb)")]:
+    for mode, results, label in [
+        ("mask", mask_results, "Mask AP"),
+        ("box",  box_results,  "Box AP (APbb)"),
+    ]:
         dcn = DCN_PLUS[mode]
         print(f"\n{SEP}")
         print(f"  CarDD TEST SET — {label} Comparison")
-        print(f"  374 images · 785 instances · IoU 0.50:0.95")
+        print(f"  Coordinate space : ORIGINAL image coordinates (predictions projected)")
+        print(f"  Headline evaluator: pycocotools COCOeval")
         print(f"  Paper: Table IV & V  (DCN+ ResNet-101, test split)")
         print(SEP)
-        print(f"\n  {'Metric':<10} {'DCN+ (R101)':>14} {'RF-DETR-Seg':>14} {'Δ':>8}")
-        print(f"  {'─'*50}")
-        for m in ["AP", "AP50", "AP75"]:
-            d = dcn[m]; r = rf[m]; delta = r - d
-            sign = "+" if delta >= 0 else ""
-            win  = "←RF-DETR" if delta>0.5 else ("←DCN+" if delta<-0.5 else "≈tie")
-            print(f"  {m:<10} {d:>14.1f} {r:>14.1f} {sign+str(round(delta,1)):>8}  {win}")
-        print(f"\n  {'Category':<18} {'DCN+':>10} {'RF-DETR':>10} {'Δ':>8}")
-        print(f"  {'─'*50}")
-        for cat in CLASSES:
-            d = dcn["per_category"][cat]; r = rf["per_category"][cat]; delta = r-d
-            sign = "+" if delta >= 0 else ""
-            bar  = "▲" if delta>1 else ("▼" if delta<-1 else "–")
-            print(f"  {cat:<18} {d:>10.1f} {r:>10.1f} {sign+str(round(delta,1)):>8}  {bar}")
+
+        if results:
+            print(f"\n  {'Metric':<10} {'DCN+(R101)':>12} "
+                  f"{'RF-DETR(pycoco)':>17} "
+                  f"{'Δ(pycoco-DCN+)':>16}")
+            print(f"  {'─'*74}")
+            for m in ["AP", "AP50", "AP75"]:
+                d    = dcn[m]
+                r_off = results.get(m, 0.0)
+                delta = r_off - d
+                sign  = "+" if delta >= 0 else ""
+                win   = "←RF-DETR" if delta > 0.5 else ("←DCN+" if delta < -0.5 else "≈tie")
+                print(f"  {m:<10} {d:>12.1f} {r_off:>17.1f} "
+                      f"{sign+str(round(delta,1)):>16}  {win}")
+
+            print(f"\n  {'Category':<18} {'DCN+':>8} "
+                  f"{'RF-DETR(pycoco)':>17} {'Δ(pycoco)':>12}")
+            print(f"  {'─'*74}")
+            for cat in CLASSES:
+                d     = dcn["per_category"][cat]
+                r_off = results.get("per_category", {}).get(cat, 0.0)
+                delta = r_off - d
+                sign  = "+" if delta >= 0 else ""
+                bar   = "▲" if delta > 1 else ("▼" if delta < -1 else "–")
+                print(f"  {cat:<18} {d:>8.1f} {r_off:>17.1f} "
+                      f"{sign+str(round(delta,1)):>12}  {bar}")
+        else:
+            print("[WARN] No metrics to display.")
+
         print(f"  {'─'*50}")
         mean_d = np.mean(list(dcn["per_category"].values()))
-        mean_r = np.mean(list(rf["per_category"].values()))
-        delta  = mean_r - mean_d
-        sign   = "+" if delta >= 0 else ""
-        print(f"  {'Mean':<18} {mean_d:>10.1f} {mean_r:>10.1f} {sign+str(round(delta,1)):>8}")
+        if results:
+            mean_r = np.mean(list(results.get("per_category", {}).values()))
+            delta  = mean_r - mean_d
+            sign   = "+" if delta >= 0 else ""
+            print(f"  {'Mean':<18} {mean_d:>10.1f} {mean_r:>10.1f} {sign+str(round(delta,1)):>8}")
         print(SEP)
 
 
 # ── INFERENCE ─────────────────────────────────────────────────────────────────
 
-def run_inference(model, img_path, threshold):
+def run_inference(model, img_path, threshold, idx_to_name, orig_W=None, orig_H=None):
+    """
+    Run RF-DETR inference and project all outputs to the ORIGINAL image
+    coordinate space before returning.
+
+    - Masks are resized from the model's output resolution to (orig_H, orig_W)
+      using bilinear interpolation + 0.5 threshold (see project_prediction_to_original).
+    - Bounding boxes are derived from the projected mask (tight bbox in original coords).
+
+    Parameters
+    ----------
+    idx_to_name : dict  — maps model class-index (0-based int) → class name str.
+                  Built from the RESIZED dataset's category list sorted by id,
+                  so it exactly matches the model's training label order.
+    orig_W, orig_H : int, optional — True original dimensions. If None, falls
+                     back to reading the physical image file dimensions.
+
+    Returns
+    -------
+    results : list of dicts — each with keys class_name, score, mask (RLE in
+              original coords), bbox (x1,y1,x2,y2 in original coords), cat
+    orig_W  : int — original image width
+    orig_H  : int — original image height
+    """
     img_pil = Image.open(img_path).convert("RGB")
-    W, H = img_pil.size
+    if orig_W is None or orig_H is None:
+        orig_W, orig_H = img_pil.size
     det = model.predict(img_pil, threshold=threshold)
     if det is None or len(det) == 0:
-        return []
+        return [], orig_W, orig_H
 
-    indices = np.argsort(-det.confidence)
+    indices  = np.argsort(-det.confidence)
     MAX_DETS = 100
-    results = []
+    results  = []
 
     for idx in indices[:MAX_DETS]:
         cid   = int(det.class_id[idx])
-        name  = CLASSES[cid] if 0 <= cid < len(CLASSES) else f"cls_{cid}"
+        # Use idx_to_name (derived from resized dataset) — NOT the hardcoded
+        # CLASSES list — so the mapping survives any category-order difference.
+        name  = idx_to_name.get(cid, f"cls_{cid}")
         score = float(det.confidence[idx])
 
-        # ── MASK ──
+        # ── MASK: project from model output space → original image coords ──
         if det.mask is not None:
-            full_mask = pred_mask_to_full(det.mask[idx].astype(bool), H, W)
+            raw_mask = det.mask[idx]   # shape varies by model impl (e.g. 1152×1152)
+            projected_rle, mask_orig = project_prediction_to_original(
+                raw_mask, orig_W, orig_H)
         else:
-            x1, y1, x2, y2 = (int(v) for v in det.xyxy[idx])
-            full_mask = np.zeros((H, W), dtype=np.uint8)
-            full_mask[max(0,y1):min(H,y2), max(0,x1):min(W,x2)] = 1
+            # No mask output: synthesise a rectangular mask from model bbox.
+            # Scale bbox from img_pil dimensions to orig_W x orig_H
+            scale_x = orig_W / img_pil.width
+            scale_y = orig_H / img_pil.height
+            x1, y1, x2, y2 = (float(v) for v in det.xyxy[idx])
+            x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
+            y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
+            mask_orig = np.zeros((orig_H, orig_W), dtype=np.uint8)
+            mask_orig[max(0, y1):min(orig_H, y2),
+                      max(0, x1):min(orig_W, x2)] = 1
+            projected_rle = maskUtils.encode(np.asfortranarray(mask_orig))
+            projected_rle["counts"] = projected_rle["counts"].decode("utf-8")
+            projected_rle["size"]   = [orig_H, orig_W]
 
-        rle = maskUtils.encode(np.asfortranarray(full_mask.astype(np.uint8)))
-        rle["counts"] = rle["counts"].decode("utf-8")
-
-        # ── BOUNDING BOX ──
-        # Derive from mask if available (tighter); fall back to model bbox
-        bbox_from_mask = mask_to_bbox(full_mask)
+        # ── BOUNDING BOX: tight bbox derived from projected mask ───────────
+        bbox_from_mask = mask_to_bbox(mask_orig)
         if bbox_from_mask is not None:
             bbox = bbox_from_mask
         else:
+            # Fallback if mask is empty (very rare)
+            scale_x = orig_W / img_pil.width
+            scale_y = orig_H / img_pil.height
             x1, y1, x2, y2 = (float(v) for v in det.xyxy[idx])
-            bbox = (x1, y1, x2, y2)
+            bbox = (x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y)
 
         results.append({
             "class_name": name,
             "score":      score,
-            "mask":       rle,
-            "bbox":       bbox,   # (x1,y1,x2,y2)
+            "mask":       projected_rle,   # RLE in ORIGINAL image coords
+            "bbox":       bbox,            # (x1,y1,x2,y2) in ORIGINAL image coords
             "cat":        name,
         })
 
     del det
-    return results
+    return results, orig_W, orig_H
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def parse_args():
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(
+        description="Evaluate RF-DETR segmentation on CarDD test set using "
+                    "pycocotools COCOeval in original image coordinates.")
     p.add_argument("--images_dir",  default=IMAGES_DIR)
-    p.add_argument("--annotations", default=ANNOTATIONS)
+    p.add_argument("--annotations", default=ANNOTATIONS,
+                   help="COCO annotation JSON for the inference image list "
+                        "(may be the resized dataset).")
+    p.add_argument("--orig_annotations", default=None,
+                   help="Path to the ORIGINAL (un-resized) CarDD test annotation "
+                        "JSON used for pycocotools evaluation and "
+                        "image_id / category_id mapping. "
+                        "If omitted, falls back to --annotations "
+                        "(coordinate reprojection still uses true image H×W).")
     p.add_argument("--checkpoint",  default=CHECKPOINT)
     p.add_argument("--resolution",  type=int,   default=RESOLUTION)
     p.add_argument("--threshold",   type=float, default=THRESHOLD)
@@ -985,31 +1083,98 @@ def main():
     plots_dir = Path(args.plots_dir)
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Load annotations ──────────────────────────────────────────────────
-    print(f"\n[INFO] Loading annotations: {args.annotations}")
+    # ── Load resized annotations (provides the image file-name list) ──────
+    print(f"\n[INFO] Loading resized annotations: {args.annotations}")
     with open(args.annotations) as f:
-        coco = json.load(f)
+        coco_resized = json.load(f)
 
-    images    = {img["id"]: img for img in coco["images"]}
-    anns      = coco["annotations"]
-    coco_cats = {c["id"]: c["name"] for c in coco["categories"]}
+    images_resized = {img["id"]: img for img in coco_resized["images"]}
+    anns_resized   = coco_resized["annotations"]
 
-    assert len(images) == 374, f"Expected 374 images, got {len(images)}"
-    assert len(anns)   == 785, f"Expected 785 annotations, got {len(anns)}"
-    print(f"[INFO] ✓ 374 images, 785 annotations")
+    if len(images_resized) != 374:
+        print(f"[WARN] Expected 374 images in resized annotations, "
+              f"got {len(images_resized)}")
+    if len(anns_resized) != 785:
+        print(f"[WARN] Expected 785 annotations in resized set, "
+              f"got {len(anns_resized)}")
+    print(f"[INFO] Resized set: {len(images_resized)} images, "
+          f"{len(anns_resized)} annotations")
 
-    # ── Decode GT masks + GT boxes ────────────────────────────────────────
+    # ── Build model class-index → name from RESIZED dataset category order ─
+    # The model's class_id output is 0-based and corresponds to the sorted
+    # category-id order of the dataset it was trained on (the resized file).
+    # This may DIFFER from the hardcoded CLASSES list if categories were
+    # assigned IDs in a different order during dataset preparation.
+    resized_cats_sorted = sorted(coco_resized["categories"], key=lambda c: c["id"])
+    model_idx_to_name: dict = {i: c["name"] for i, c in enumerate(resized_cats_sorted)}
+    print(f"\n[INFO] Model class-index → name (from resized dataset): {model_idx_to_name}")
+
+    # Warn if the resized category order differs from the hardcoded CLASSES list
+    hardcoded_order = {i: c for i, c in enumerate(CLASSES)}
+    if model_idx_to_name != hardcoded_order:
+        print(f"[WARN] Resized dataset category order DIFFERS from hardcoded CLASSES list!")
+        print(f"       Hardcoded CLASSES : {hardcoded_order}")
+        print(f"       Resized file order: {model_idx_to_name}")
+        print(f"       Using resized file order for class-name mapping (correct).")
+    else:
+        print(f"[INFO] ✓ Resized category order matches hardcoded CLASSES list.")
+
+    # ── Load ORIGINAL annotations (for pycocotools + ID/category mapping) ─
+    orig_ann_path = args.orig_annotations if args.orig_annotations else args.annotations
+    print(f"\n[INFO] Loading original annotations: {orig_ann_path}")
+    coco_gt_orig = COCO(orig_ann_path)
+
+    # filename (basename) → original image_id
+    # (image order / IDs may differ between resized and original datasets)
+    fname_to_orig_id: dict = {}
+    for img_id, img_info in coco_gt_orig.imgs.items():
+        fname_to_orig_id[Path(img_info["file_name"]).name] = img_id
+
+    # class_name → original category_id (name-based lookup, not positional)
+    # Original dataset may have different numeric IDs for the same class names.
+    name_to_orig_cat_id: dict = {
+        cat["name"]: cat["id"]
+        for cat in coco_gt_orig.dataset["categories"]
+    }
+    print(f"[INFO] Original annotations: {len(coco_gt_orig.imgs)} images, "
+          f"{len(coco_gt_orig.anns)} annotations")
+    print(f"[INFO] Original category → ID: {name_to_orig_cat_id}")
+
+    # Cross-check: every class the model can predict must exist in original annotations
+    model_class_names = set(model_idx_to_name.values())
+    missing_in_orig   = model_class_names - set(name_to_orig_cat_id.keys())
+    if missing_in_orig:
+        print(f"[WARN] Classes in model NOT found in original annotations: {missing_in_orig}")
+        print(f"       Predictions for these classes will be EXCLUDED from COCOeval!")
+    else:
+        print(f"[INFO] ✓ All model class names found in original annotations.")
+
+    # Also warn about any mismatch in the original category order vs resized
+    orig_cats_sorted   = sorted(coco_gt_orig.dataset["categories"], key=lambda c: c["id"])
+    orig_name_order    = [c["name"] for c in orig_cats_sorted]
+    resized_name_order = [c["name"] for c in resized_cats_sorted]
+    if orig_name_order != resized_name_order:
+        print(f"[WARN] Category NAME ORDER differs between original and resized datasets!")
+        print(f"       Original order : {orig_name_order}")
+        print(f"       Resized  order : {resized_name_order}")
+        print(f"       Name-based lookup (name_to_orig_cat_id) handles this correctly.")
+    else:
+        print(f"[INFO] ✓ Category name order matches between original and resized datasets.")
+
+    # ── Decode GT masks + boxes from ORIGINAL annotations ────────────────
+    # GT must be in original image coordinates to match projected predictions.
     gts_mask_by_cat = defaultdict(list)
     gts_box_by_cat  = defaultdict(list)
-    print("[INFO] Decoding GT masks …")
+    print("[INFO] Decoding GT masks from original annotations …")
     decode_errors = 0
 
-    for ann in tqdm(anns, desc="GT masks", ncols=70):
-        img   = images[ann["image_id"]]
-        H, W  = img["height"], img["width"]
-        cname = coco_cats.get(ann["category_id"])
-        if cname not in CLASSES:
+    for ann_id, ann in coco_gt_orig.anns.items():
+        img_info = coco_gt_orig.imgs[ann["image_id"]]
+        H, W     = img_info["height"], img_info["width"]
+        cat_name = coco_gt_orig.cats[ann["category_id"]]["name"]
+        if cat_name not in CLASSES:
             continue
+        cname = cat_name
 
         seg = ann["segmentation"]
         try:
@@ -1030,10 +1195,10 @@ def main():
         entry_mask = {"image_id": ann["image_id"], "mask": rle, "cat": cname}
         gts_mask_by_cat[cname].append(entry_mask)
 
-        # GT box from annotation (COCO format: x,y,w,h)
+        # GT box from annotation (COCO format: x,y,w,h → convert to x1,y1,x2,y2)
         x, y, w, h = ann["bbox"]
         entry_box  = {"image_id": ann["image_id"],
-                      "bbox": (x, y, x+w, y+h), "cat": cname}
+                      "bbox": (x, y, x + w, y + h), "cat": cname}
         gts_box_by_cat[cname].append(entry_box)
 
     if decode_errors:
@@ -1058,13 +1223,16 @@ def main():
     images_dir = Path(args.images_dir)
     preds_mask_by_cat = defaultdict(list)
     preds_box_by_cat  = defaultdict(list)
+    coco_results_segm: list = []   # For COCOeval (segmentation)
+    coco_results_bbox: list = []   # For COCOeval (bounding box)
     failed = 0
 
-    print(f"\n[INFO] Running inference on {len(images)} images …")
-    print(f"[INFO] Confidence threshold: {args.threshold}")
+    print(f"\n[INFO] Running inference on {len(images_resized)} images …")
+    print(f"[INFO] Confidence threshold  : {args.threshold}")
+    print(f"[INFO] Coordinate space      : predictions projected to original image space")
     t0 = time.time()
 
-    for img_id, img_info in tqdm(images.items(), desc="Inference", ncols=70):
+    for img_id, img_info in tqdm(images_resized.items(), desc="Inference", ncols=70):
         img_path = images_dir / img_info["file_name"]
         if not img_path.exists():
             hits = list(images_dir.rglob(img_info["file_name"]))
@@ -1072,180 +1240,234 @@ def main():
         if img_path is None or not img_path.exists():
             failed += 1; continue
 
+        # Resolve the ORIGINAL image_id by filename matching.
+        # Three-step fallback handles Roboflow-renamed files:
+        #   Step 1: exact basename match  (both datasets use the same filename)
+        #   Step 2: Roboflow-decoded match (strip '.rf.<hash>' suffix → original name)
+        #   Step 3: stem-only match        (last resort, e.g. extension changed)
+        fname        = Path(img_info["file_name"]).name
+        decoded_fname = decode_roboflow_filename(fname)
+
+        orig_img_id = fname_to_orig_id.get(fname)                     # Step 1
+        if orig_img_id is None and decoded_fname != fname:
+            orig_img_id = fname_to_orig_id.get(decoded_fname)         # Step 2
+            if orig_img_id is not None:
+                pass  # matched via Roboflow decode
+        if orig_img_id is None:
+            # Step 3: stem-only scan (slow, only for edge cases)
+            fname_stem   = Path(fname).stem
+            decoded_stem = Path(decoded_fname).stem
+            for k, v in fname_to_orig_id.items():
+                if Path(k).stem in (fname_stem, decoded_stem):
+                    orig_img_id = v
+                    break
+        if orig_img_id is None:
+            print(f"\n[WARN] '{fname}' (decoded: '{decoded_fname}') not found in "
+                  f"original annotations — predictions omitted from COCOeval")
+
+        # Get true original dimensions for projection
+        if orig_img_id is not None:
+            orig_info = coco_gt_orig.imgs[orig_img_id]
+            true_W, true_H = orig_info["width"], orig_info["height"]
+        else:
+            true_W, true_H = img_info["width"], img_info["height"]
+
         try:
-            preds = run_inference(model, img_path, args.threshold)
+            preds, orig_W, orig_H = run_inference(
+                model, img_path, args.threshold, model_idx_to_name, true_W, true_H)
         except Exception as e:
             print(f"\n[WARN] {img_info['file_name']}: {e}")
             failed += 1; continue
+
+        # Effective image_id (use orig when available)
+        eff_img_id = orig_img_id if orig_img_id is not None else img_id
 
         for p in preds:
             cat = p["class_name"]
             if cat not in CLASSES:
                 continue
+
+            x1, y1, x2, y2 = p["bbox"]   # already in original image coords
+            bbox_xywh = [float(x1), float(y1),
+                         float(x2 - x1), float(y2 - y1)]
+
+            # ── Extract results ──────────────
             preds_mask_by_cat[cat].append({
-                "image_id": img_id, "score": p["score"],
-                "mask": p["mask"], "cat": cat})
+                "image_id": eff_img_id,
+                "score":    p["score"],
+                "mask":     p["mask"],          # projected RLE in orig coords
+                "cat":      cat,
+            })
             preds_box_by_cat[cat].append({
-                "image_id": img_id, "score": p["score"],
-                "bbox": p["bbox"], "cat": cat})
+                "image_id": eff_img_id,
+                "score":    p["score"],
+                "bbox":     (x1, y1, x2, y2),  # (x1,y1,x2,y2) in orig coords
+                "cat":      cat,
+            })
+
+            # ── COCO results (only when orig ID is resolved) ──
+            if orig_img_id is not None:
+                orig_cat_id = name_to_orig_cat_id.get(cat)
+                if orig_cat_id is not None:
+                    coco_results_segm.append({
+                        "image_id":     orig_img_id,
+                        "category_id":  orig_cat_id,
+                        "segmentation": p["mask"],    # projected RLE
+                        "score":        float(p["score"]),
+                        "bbox":         bbox_xywh,    # COCO format: [x,y,w,h]
+                    })
+                    coco_results_bbox.append({
+                        "image_id":    orig_img_id,
+                        "category_id": orig_cat_id,
+                        "bbox":        bbox_xywh,     # COCO format: [x,y,w,h]
+                        "score":       float(p["score"]),
+                    })
 
     elapsed = time.time() - t0
     total_p = sum(len(v) for v in preds_mask_by_cat.values())
     print(f"[INFO] Done in {elapsed:.1f}s  |  Total preds: {total_p}  |  Failed: {failed}")
+    print(f"[INFO] COCO results entries : {len(coco_results_segm)} segm / "
+          f"{len(coco_results_bbox)} bbox")
 
-    # ── Compute metrics ───────────────────────────────────────────────────
-    print("\n[INFO] Computing MASK metrics …")
-    rf_mask = compute_metrics(dict(preds_mask_by_cat), dict(gts_mask_by_cat), use_box=False)
+    # ── Pycocotools evaluation (headline numbers) ───────────────
+    print("\n[INFO] Running pycocotools evaluation …")
+    mask_results = run_cocoeval(
+        coco_gt_orig, coco_results_segm, "segm", label="RF-DETR")
+    box_results  = run_cocoeval(
+        coco_gt_orig, coco_results_bbox, "bbox", label="RF-DETR")
 
-    print("[INFO] Computing BOX metrics …")
-    rf_box  = compute_metrics(dict(preds_box_by_cat),  dict(gts_box_by_cat),  use_box=True)
+    print_table(mask_results, box_results)
 
-    print_table(rf_mask, rf_box)
-
-    # ── Save JSON ─────────────────────────────────────────────────────────
-    output = {
-        "model": "RF-DETR-Seg-Medium", "checkpoint": str(args.checkpoint),
-        "resolution": args.resolution, "threshold": args.threshold,
-        "dataset": {"images": 374, "annotations": 785,
-                    "note": "CarDD test split"},
-        "mask_ap": {
-            "AP": rf_mask["AP"], "AP50": rf_mask["AP50"], "AP75": rf_mask["AP75"],
-            "per_category": rf_mask["per_category"],
-        },
-        "box_ap": {
-            "AP": rf_box["AP"], "AP50": rf_box["AP50"], "AP75": rf_box["AP75"],
-            "per_category": rf_box["per_category"],
-        },
-        "dcnplus_reference": DCN_PLUS,
-        "inference_stats": {
-            "time_seconds": round(elapsed,1),
-            "failed_images": failed, "total_predictions": total_p,
-        },
-    }
-    with open(args.output_json, "w") as f:
-        json.dump(output, f, indent=2)
-    print(f"\n[INFO] Results saved → {args.output_json}")
+    # ── Save COCO results JSONs ───────────────────────────────────────────
+    out_base  = str(args.output_json).replace(".json", "")
+    segm_json = out_base + "_coco_segm.json"
+    bbox_json = out_base + "_coco_bbox.json"
+    with open(segm_json, "w") as f:
+        json.dump(coco_results_segm, f, indent=2)
+    with open(bbox_json, "w") as f:
+        json.dump(coco_results_bbox, f, indent=2)
+    print(f"\n[INFO] COCO segm results  → {segm_json}")
+    print(f"[INFO] COCO bbox results  → {bbox_json}")
 
     # ── Generate all plots ────────────────────────────────────────────────
     print("\n[INFO] Generating plots …")
 
-    plot_pr_curves(rf_mask, plots_dir, mode="mask")
-    plot_pr_curves(rf_box,  plots_dir, mode="box")
+    plot_pr_curves(mask_results, plots_dir, mode="mask")
+    plot_pr_curves(box_results,  plots_dir, mode="box")
 
     mask_best = plot_f1_vs_threshold(dict(preds_mask_by_cat), dict(gts_mask_by_cat),
                                      plots_dir, mode="mask")
     box_best  = plot_f1_vs_threshold(dict(preds_box_by_cat),  dict(gts_box_by_cat),
                                      plots_dir, mode="box")
 
-    plot_ap_comparison_bar(rf_mask, mode="mask", plots_dir=plots_dir)
-    plot_ap_comparison_bar(rf_box,  mode="box",  plots_dir=plots_dir)
+    plot_ap_comparison_bar(mask_results, mode="mask", plots_dir=plots_dir)
+    plot_ap_comparison_bar(box_results,  mode="box",  plots_dir=plots_dir)
 
-    plot_radar(rf_mask, rf_box, plots_dir)
+    plot_radar(mask_results, box_results, plots_dir)
 
     plot_prf_summary(mask_best, box_best, plots_dir)
 
-    plot_ap_vs_iou(rf_mask, rf_box,
-                   dict(preds_mask_by_cat), dict(gts_mask_by_cat),
-                   dict(preds_box_by_cat),  dict(gts_box_by_cat),
-                   plots_dir)
+
 
     plot_confusion(dict(preds_mask_by_cat), dict(gts_mask_by_cat),
                    plots_dir, mode="mask")
     plot_confusion(dict(preds_box_by_cat),  dict(gts_box_by_cat),
                    plots_dir, mode="box")
 
-    # ── NEW: Mask vs Box charts ───────────────────────────────────────────
-    plot_rfdetr_mask_vs_box_overall(rf_mask, rf_box, plots_dir)
-    plot_rfdetr_mask_vs_box_per_category(rf_mask, rf_box, plots_dir)
-    plot_comparison_overall_mask_box(rf_mask, rf_box, plots_dir)
-    plot_comparison_per_category_mask_box(rf_mask, rf_box, plots_dir)
+    # ── Mask vs Box charts ─────────────────────
+    plot_rfdetr_mask_vs_box_overall(mask_results, box_results, plots_dir)
+    plot_rfdetr_mask_vs_box_per_category(mask_results, box_results, plots_dir)
+    plot_comparison_overall_mask_box(mask_results, box_results, plots_dir)
+    plot_comparison_per_category_mask_box(mask_results, box_results, plots_dir)
 
     # ── Save full JSON (all chart values) ────────────────────────────────
-    # AP vs IoU curve data
-    ap_vs_iou_mask, ap_vs_iou_box = [], []
-    for iou in IOU_THRESHOLDS:
-        aps_m, aps_b = [], []
-        for cat in CLASSES:
-            av_m, _, _ = ap_and_curve(dict(preds_mask_by_cat).get(cat, []),
-                                      dict(gts_mask_by_cat).get(cat, []), iou, False)
-            av_b, _, _ = ap_and_curve(dict(preds_box_by_cat).get(cat, []),
-                                      dict(gts_box_by_cat).get(cat, []), iou, True)
-            aps_m.append(av_m); aps_b.append(av_b)
-        ap_vs_iou_mask.append(round(float(np.mean(aps_m)), 2))
-        ap_vs_iou_box.append(round(float(np.mean(aps_b)), 2))
-
     # PR curve data (IoU=0.50, sampled at 20 points for readability)
     def sample_curve(rec, prec, n=20):
         idx = np.linspace(0, len(rec)-1, min(n, len(rec)), dtype=int)
-        return {"recall": [round(float(rec[i]),3) for i in idx],
-                "precision": [round(float(prec[i]),3) for i in idx]}
+        return {"recall":    [round(float(rec[i]),  3) for i in idx],
+                "precision": [round(float(prec[i]), 3) for i in idx]}
 
     pr_curves_mask, pr_curves_box = {}, {}
     for cat in CLASSES:
-        r_m, p_m = rf_mask["_curves"][cat][0.50]
-        r_b, p_b = rf_box["_curves"][cat][0.50]
+        r_m, p_m = mask_results["_curves"][cat][0.50]
+        r_b, p_b = box_results["_curves"][cat][0.50]
         pr_curves_mask[cat] = sample_curve(r_m, p_m)
         pr_curves_box[cat]  = sample_curve(r_b, p_b)
 
-    # Delta tables
-    def delta_table(rf_res, mode):
-        dcn = DCN_PLUS[mode]["per_category"]
-        return {cat: round(rf_res["per_category"][cat] - dcn[cat], 1) for cat in CLASSES}
+    off_m_per = (mask_results or {}).get("per_category", {})
+    off_b_per = (box_results  or {}).get("per_category", {})
 
     output = {
         "model":      "RF-DETR-Seg-Medium",
         "checkpoint": str(args.checkpoint),
         "resolution": args.resolution,
         "threshold":  args.threshold,
-        "dataset":    {"images": 374, "annotations": 785, "note": "CarDD test split"},
+        "eval_methodology": {
+            "coordinate_space":   "original image coordinates (projected from model output)",
+            "headline_evaluator": "pycocotools.cocoeval.COCOeval",
+            "orig_annotations":   orig_ann_path,
+        },
+        "dataset": {
+            "images":      len(images_resized),
+            "annotations": len(anns_resized),
+            "note":        "CarDD test split (image list from resized annotation file)",
+        },
 
-        # ── Core AP metrics ──────────────────────────────────────────────
+        # ── HEADLINE: pycocotools results ────────────────────────
         "mask_ap": {
-            "AP":   rf_mask["AP"],
-            "AP50": rf_mask["AP50"],
-            "AP75": rf_mask["AP75"],
-            "per_category": rf_mask["per_category"],
-            "per_category_AP50": {c: round(v,1) for c,v in rf_mask["_per_cat_ap50"].items()},
-            "per_category_AP75": {c: round(v,1) for c,v in rf_mask["_per_cat_ap75"].items()},
-        },
+            "AP":           mask_results.get("AP",   None),
+            "AP50":         mask_results.get("AP50", None),
+            "AP75":         mask_results.get("AP75", None),
+            "APs":          mask_results.get("APs",  None),
+            "APm":          mask_results.get("APm",  None),
+            "APl":          mask_results.get("APl",  None),
+            "per_category": mask_results.get("per_category", {}),
+        } if mask_results else None,
         "box_ap": {
-            "AP":   rf_box["AP"],
-            "AP50": rf_box["AP50"],
-            "AP75": rf_box["AP75"],
-            "per_category": rf_box["per_category"],
-            "per_category_AP50": {c: round(v,1) for c,v in rf_box["_per_cat_ap50"].items()},
-            "per_category_AP75": {c: round(v,1) for c,v in rf_box["_per_cat_ap75"].items()},
-        },
+            "AP":           box_results.get("AP",   None),
+            "AP50":         box_results.get("AP50", None),
+            "AP75":         box_results.get("AP75", None),
+            "APs":          box_results.get("APs",  None),
+            "APm":          box_results.get("APm",  None),
+            "APl":          box_results.get("APl",  None),
+            "per_category": box_results.get("per_category", {}),
+        } if box_results else None,
 
-        # ── DCN+ reference ───────────────────────────────────────────────
+        # ── DCN+ reference ────────────────────────────────────────────────
         "dcnplus_reference": DCN_PLUS,
 
-        # ── Delta vs DCN+ ────────────────────────────────────────────────
+        # ── Delta vs DCN+ ───────
         "delta_vs_dcnplus": {
             "mask": {
-                "AP":   round(rf_mask["AP"]   - DCN_PLUS["mask"]["AP"],   1),
-                "AP50": round(rf_mask["AP50"] - DCN_PLUS["mask"]["AP50"], 1),
-                "AP75": round(rf_mask["AP75"] - DCN_PLUS["mask"]["AP75"], 1),
-                "per_category": delta_table(rf_mask, "mask"),
-            },
+                "AP":   round(mask_results["AP"]   - DCN_PLUS["mask"]["AP"],   1),
+                "AP50": round(mask_results["AP50"] - DCN_PLUS["mask"]["AP50"], 1),
+                "AP75": round(mask_results["AP75"] - DCN_PLUS["mask"]["AP75"], 1),
+                "per_category": {
+                    cat: round(off_m_per.get(cat, 0) - DCN_PLUS["mask"]["per_category"][cat], 1)
+                    for cat in CLASSES
+                },
+            } if mask_results else {},
             "box": {
-                "AP":   round(rf_box["AP"]   - DCN_PLUS["box"]["AP"],   1),
-                "AP50": round(rf_box["AP50"] - DCN_PLUS["box"]["AP50"], 1),
-                "AP75": round(rf_box["AP75"] - DCN_PLUS["box"]["AP75"], 1),
-                "per_category": delta_table(rf_box, "box"),
-            },
+                "AP":   round(box_results["AP"]   - DCN_PLUS["box"]["AP"],   1),
+                "AP50": round(box_results["AP50"] - DCN_PLUS["box"]["AP50"], 1),
+                "AP75": round(box_results["AP75"] - DCN_PLUS["box"]["AP75"], 1),
+                "per_category": {
+                    cat: round(off_b_per.get(cat, 0) - DCN_PLUS["box"]["per_category"][cat], 1)
+                    for cat in CLASSES
+                },
+            } if box_results else {},
         },
 
-        # ── Mask vs Box delta (RF-DETR internal) ─────────────────────────
+        # ── Mask vs Box delta ──
         "mask_vs_box_delta": {
-            "AP":   round(rf_box["AP"]   - rf_mask["AP"],   1),
-            "AP50": round(rf_box["AP50"] - rf_mask["AP50"], 1),
-            "AP75": round(rf_box["AP75"] - rf_mask["AP75"], 1),
+            "AP":   round(box_results.get("AP", 0)   - mask_results.get("AP", 0),   1),
+            "AP50": round(box_results.get("AP50", 0) - mask_results.get("AP50", 0), 1),
+            "AP75": round(box_results.get("AP75", 0) - mask_results.get("AP75", 0), 1),
             "per_category": {
-                cat: round(rf_box["per_category"][cat] - rf_mask["per_category"][cat], 1)
+                cat: round(off_b_per.get(cat, 0) - off_m_per.get(cat, 0), 1)
                 for cat in CLASSES
             },
-        },
+        } if box_results and mask_results else {},
 
         # ── F1 / Precision / Recall at best threshold ─────────────────────
         "best_threshold_metrics": {
@@ -1261,17 +1483,6 @@ def main():
                 "recall":     round(box_best[2], 4),
                 "f1":         round(box_best[3], 4),
             },
-        },
-
-        # ── AP vs IoU threshold curve (chart 9) ───────────────────────────
-        "ap_vs_iou_curve": {
-            "iou_thresholds": [round(float(v), 2) for v in IOU_THRESHOLDS],
-            "rf_detr_mask":   ap_vs_iou_mask,
-            "rf_detr_box":    ap_vs_iou_box,
-            "dcnplus_mask_ref_points": {"0.50": DCN_PLUS["mask"]["AP50"],
-                                        "0.75": DCN_PLUS["mask"]["AP75"]},
-            "dcnplus_box_ref_points":  {"0.50": DCN_PLUS["box"]["AP50"],
-                                        "0.75": DCN_PLUS["box"]["AP75"]},
         },
 
         # ── PR curve data (IoU=0.50, charts 1 & 2) ───────────────────────

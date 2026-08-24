@@ -536,7 +536,7 @@ Health Score = 100 − 6 − 6 − 10 = **78**
 
 ## Evaluation
 
-The `evaluation/` directory contains all scripts, charts, and results used to benchmark both RF-DETR models on their respective test sets.
+The `evaluation/` directory contains all scripts, charts, and results used to benchmark both RF-DETR models on their respective test sets. Full metric tables are kept inside the evaluation READMEs.
 
 ### 📥 Model & Dataset Download
 
