@@ -1,6 +1,6 @@
 # AutoScan AI — Car Damage Analysis System
 
-> An end-to-end AI pipeline that detects, segments, validates, and scores car damage from a single photograph — running locally on GPU via a Flask web interface.
+> An end-to-end AI pipeline that detects, segments, validates, and scores car damage from a single photograph — running locally on GPU via a Flask web interface. 
 
 ---
 
@@ -20,8 +20,8 @@
 12. [Validation Logic](#validation-logic)
 13. [Health Score Formula](#health-score-formula)
 14. [Evaluation](#evaluation)
-15. [User Interface](#User-Interface)
-16. [Acknowledgements](#Acknowledgements)
+15. [User Interface](#user-interface)
+16. [Acknowledgements](#acknowledgements)
 
 ---
 
