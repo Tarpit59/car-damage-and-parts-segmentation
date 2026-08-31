@@ -18,8 +18,9 @@ Evaluation of the **RF-DETR-Seg-Medium** model trained on the [CarDD](https://ca
 
 ## 📦 Dataset Details
 
-- **Source:** The [CarDD (Car Damage Detection)](https://cardd-ustc.github.io/) dataset is used — a publicly available benchmark specifically designed for vision-based car damage detection.
-- **Resolution:** All images are resized to **1152 × 1152** pixels before training and evaluation.
+- **Source:** The [CarDD (Car Damage Detection)](https://cardd-ustc.github.io/) dataset — a publicly available benchmark designed for vision-based car damage detection.
+- **Training resolution:** images were resized to **1152 × 1152** for training.
+- **Evaluation resolution:** the **original, un-resized** CarDD images are used (see [Evaluation Methodology](#-evaluation-methodology)). The test split is the official one — 374 images out of CarDD's 4,000 (2,816 train / 810 val / 374 test), the same split the paper's DCN+ row was measured on.
 - **Format:** COCO JSON with polygon segmentation masks.
 
 ### Class Distribution
@@ -55,7 +56,7 @@ Evaluation of the **RF-DETR-Seg-Medium** model trained on the [CarDD](https://ca
 Car Damage/
 ├── Testing/
 │   ├── evaluate_rfdetr_cardd_full.py   ← Full test-set evaluation script (main)
-│   └── plots/                          ← Main evaluation results (14 charts + JSON)
+│   └── plots/                          ← Main evaluation results (15 charts + JSON)
 │       ├── results.json
 │       ├── results_coco_segm.json
 │       ├── results_coco_bbox.json
@@ -67,6 +68,7 @@ Car Damage/
 │       ├── ap_comparison_bar_mask.png
 │       ├── ap_comparison_bar_box.png
 │       ├── precision_recall_f1_summary.png
+│       ├── iou_threshold_ap_curve.png
 │       ├── confusion_heatmap_mask.png
 │       ├── confusion_heatmap_box.png
 │       ├── rfdetr_mask_vs_box_overall.png
@@ -99,35 +101,51 @@ Car Damage/
 
 ### Script: `Testing/evaluate_rfdetr_cardd_full.py`
 
-Runs the trained RF-DETR model against the CarDD test split and computes full COCO-standard AP metrics for both instance segmentation (mask) and object detection (bounding box). All results are evaluated in **original image coordinates** using `pycocotools.cocoeval.COCOeval` and compared with the DCN+ (ResNet-101) baseline from the CarDD paper.
+Runs the trained RF-DETR model against the CarDD test split and computes full COCO-standard AP metrics for both instance segmentation (mask) and object detection (bounding box), then compares them with the DCN+ (ResNet-101) baseline from the CarDD paper.
 
 ---
 
 ### 🔬 Evaluation Methodology
 
-#### Why Not Evaluate Directly on Resized Images?
+#### Images are fed to the model unresized
 
-The RF-DETR model is trained on images resized to 1152 × 1152 pixels and internally infers at the configured resolution (960 px). However, the CarDD ground-truth annotations are defined in the **original image coordinate space** (varying dimensions). If predictions from the model's output resolution were directly compared against these ground-truth annotations using COCO evaluation, the IoU computation would operate across mismatched coordinate spaces — producing **meaningless metrics**.
+The model was **trained** on images resized to 1152 × 1152. Evaluation does **not** repeat that resize.
 
-Therefore, all model predictions (masks and bounding boxes) are **projected back to original image coordinates** before running `pycocotools.cocoeval.COCOeval`. This ensures that IoU, AP, and all derived metrics are computed in the same coordinate space as the CarDD paper's reported baselines.
+RF-DETR's post-processing (`rfdetr/models/postprocess.py`) bilinearly interpolates the mask *logits* to the size of the image it was handed and only then thresholds them, so `det.mask` is returned in the input image's coordinate space. Feeding the **original** CarDD image therefore produces a mask already in original coordinates, with **no projection step at all**. The mask's shape is asserted against the image dimensions and a mismatch raises, so pointing `--images_dir` at a resized copy fails loudly instead of silently rescaling.
 
-#### Coordinate Projection Pipeline
+This is also the more accurate route. The alternative — infer on a resized copy, then `cv2.resize` the *already-binarised* mask back down — resamples a binary image and re-thresholds it, which is strictly lossier than interpolating the logits once. The loss falls on the classes whose boundaries are only a few pixels wide — `crack` and `scratch` — rather than on large, blob-like damage.
 
-- **Mask projection:** The model's output mask (at its internal resolution) is resized to the original image dimensions using **bilinear interpolation** followed by a **0.5 threshold** binarisation (`cv2.resize` + threshold). The resulting binary mask is then RLE-encoded for COCO evaluation.
-- **Bounding box derivation:** Rather than scaling the model's bounding box coordinates (which can accumulate rounding errors), the bounding box is derived as the **tight bounding box of the projected mask** in original image coordinates. This ensures pixel-exact consistency between the mask and its corresponding bounding box.
+Because the model squashes whatever it is given to a square internally, giving it the native image is not only lossless at the boundary but also removes an entire class of coordinate-space bug: predictions and ground truth are in the same frame by construction rather than by a conversion that has to be trusted.
 
-#### Dual-Annotation Approach
+#### Bounding box derivation
 
-The evaluation uses two separate COCO annotation files:
+Boxes are the **tight bounding box of the predicted mask**, not the model's box head output. This guarantees pixel-exact consistency between a mask and its box, so mask AP and box AP describe the same predicted region.
 
-1. **Resized annotations** (`--annotations`): Provides the image file list and the model's class-index mapping (the model was trained on resized data, so its class ordering matches the resized file's category IDs).
-2. **Original annotations** (`--orig_annotations`): Provides the ground-truth masks and bounding boxes in **original image coordinates**, along with original image IDs and dimensions used for coordinate projection.
+#### One annotation file drives the evaluation
 
-Image matching between datasets is handled by a **3-step filename fallback**: exact basename match → Roboflow filename decoding (stripping `.rf.<hash>` suffixes) → stem-only matching.
+`--orig_annotations` (the original, un-resized CarDD test annotations) is **required** and is the single source of the image list, the scored ground truth, the image IDs and the true image dimensions. Because one file supplies all of these, the set of images evaluated cannot drift out of step with the ground truth scored.
+
+`--annotations` is **optional** and is never scored. Its only job is to verify the model's label order. RF-DETR emits a 0-based class index in the order of the dataset it was *trained* on, and that order cannot be recovered from the original CarDD file — the two genuinely differ:
+
+```
+training export order : crack, dent, glass shatter, lamp broken, scratch, tire flat
+original CarDD order  : dent, scratch, crack, glass shatter, lamp broken, tire flat
+```
+
+Passing the training export makes the script replicate RF-DETR's own `cat2label` mapping (`{cat_id: i for i, cat_id in enumerate(sorted(coco.cats.keys()))}`, unfiltered — a Roboflow dummy supercategory at id 0 counts and shifts every real class by one) and abort if it disagrees with the hardcoded class list. Prediction → ground-truth category mapping is done **by name**, never positionally, so the differing orders are handled correctly.
+
+#### Two thresholds, deliberately separate
+
+| | Value | Purpose |
+|---|---|---|
+| `--threshold` | `0.001` | **Collection** threshold handed to COCOeval. Must stay low — COCOeval sweeps the score axis itself when building the PR curve, so raising it truncates the recall axis and *understates* AP. Not an operating point. |
+| `REPORT_THRESHOLD` | `0.50` | **Reporting** threshold, used only for the P/R/F1 summary and the confusion matrix. A conventional value fixed in advance, so it is not tuned on the test set. |
+
+Quoting a single-threshold precision at 0.001 would measure precision over ~48 detections per ground-truth instance and report a near-zero F1 for a healthy model, which is why the two are kept apart. AP is unaffected by `REPORT_THRESHOLD`.
 
 #### Area Range Configuration (APs / APm / APl)
 
-The CarDD paper uses **non-standard area ranges** for size-stratified evaluation (Table IV), which differ from the default COCO definition:
+The CarDD paper uses **non-standard area ranges** for size-stratified evaluation (Table IV):
 
 | Size Category | CarDD Paper (used here) | COCO Standard |
 |---------------|------------------------|---------------|
@@ -135,173 +153,218 @@ The CarDD paper uses **non-standard area ranges** for size-stratified evaluation
 | **Medium** | 128² ≤ area < 256² | 32² ≤ area < 96² |
 | **Large** | area ≥ 256² | area ≥ 96² |
 
-Our evaluation script configures `COCOeval.params.areaRng` to match the CarDD paper's non-standard ranges, ensuring that the reported APs / APm / APl values are **directly comparable** with the DCN+ baseline numbers from the paper. This is critical: using COCO default area ranges would produce different APs / APm / APl values that cannot be fairly compared against the CarDD paper's results.
+`COCOeval.params.areaRng` is configured to match, so the reported APs / APm / APl are **directly comparable** with the paper's DCN+ numbers. COCO defaults would produce different values that cannot be fairly compared.
+
+For a segmentation result, COCOeval bins detections by their **mask** area. `pycocotools`' `loadRes` tests `if 'bbox' in anns[0]` *before* `elif 'segmentation' in anns[0]`, so a `bbox` key on a segm result silently switches the binning to *box* area while the ground truth stays binned by mask area — computing size-stratified AP over two partitions that do not correspond. The segm results here therefore carry only `image_id`, `category_id`, `segmentation` and `score`, and a runtime assertion after `loadRes` re-raises if a detection's stored `area` ever disagrees with its decoded mask area. (AP, AP50 and AP75 use the "all" area range and are unaffected by this, which is what makes the defect invisible in the headline number.)
 
 #### Evaluator
 
-All headline AP metrics are computed using **`pycocotools.cocoeval.COCOeval`** — the standard COCO evaluation library — with the area range configuration described above. The evaluator uses 101-point precision interpolation across 10 IoU thresholds (0.50 : 0.05 : 0.95), consistent with the COCO evaluation protocol.
+All headline AP metrics come from **`pycocotools.cocoeval.COCOeval`** with the area ranges above and its standard protocol: 10 IoU thresholds (0.50 : 0.05 : 0.95), 101-point interpolated precision, and a maximum of 100 detections per image.
 
 ---
 
 ### 🔄 Evaluation Flow
 
 ```
-1. Load RESIZED COCO annotations
-   └─ Provides image file list + model class-index → name mapping
+1. Load ORIGINAL COCO annotations  (--orig_annotations, required)
+   ├─ Single source of: image list · GT masks/boxes · image IDs · dimensions
+   └─ Guard: aborts if the stored GT 'area' fields are box areas, not mask areas
 
-2. Load ORIGINAL COCO annotations
-   └─ Provides GT masks/boxes in original coordinates, image IDs, image dimensions
+2. Build the model class-index → name map from the hardcoded class list
+   └─ Optional: verify it against the training export (--annotations), replicating
+      RF-DETR's own cat2label mapping; abort on disagreement
 
-3. Build cross-dataset mappings
-   ├─ model_idx_to_name: class-index (0-based) → class name (from resized dataset)
-   ├─ fname_to_orig_id: filename → original image_id
-   └─ name_to_orig_cat_id: class name → original category_id
+3. Map class name → original category_id  (by name, never positionally)
+   └─ Abort if any class the model can predict is absent from the scored annotations
 
-4. Decode all GT masks from original annotations
-   └─ Polygon → binary mask → RLE (in original coordinates)
+4. Decode all GT masks from the original annotations
+   └─ Polygon → binary mask → RLE (native image coordinates)
 
-5. Load RF-DETR-Seg-Medium model checkpoint
+5. Compute the ground-truth support table (per class × CarDD size bin, by mask area)
 
-6. For each test image (374 images):
-   ├─ 6a. Resolve original image_id via 3-step filename matching
-   │       (exact → Roboflow decode → stem match)
-   ├─ 6b. Get original image dimensions (H × W)
-   ├─ 6c. Run model inference → raw masks at model resolution
-   ├─ 6d. Project masks to original coordinates (bilinear + 0.5 threshold)
-   ├─ 6e. Derive bounding boxes from projected masks (tight bbox)
-   └─ 6f. Build COCO-format result entries (segm + bbox)
+6. Load RF-DETR-Seg-Medium model checkpoint
 
-7. Run pycocotools COCOeval
+7. For each test image (374 images):
+   ├─ 7a. Resolve the image file (counted as failed if it cannot be found)
+   ├─ 7b. Run inference on the ORIGINAL image
+   │     └─ asserts the file's dimensions match the annotations, and that the
+   │        returned mask has the same shape as the image
+   ├─ 7c. Derive the tight bounding box from each mask
+   └─ 7d. Build COCO result entries (segm without a bbox key; bbox with one)
+   After the loop: abort if more than 10% of images could not be read, rather
+   than reporting metrics computed over the remainder
+
+8. Run pycocotools COCOeval
    ├─ iouType = "segm" → Mask AP / AP50 / AP75 / APs / APm / APl
-   └─ iouType = "bbox" → Box AP / AP50 / AP75 / APs / APm / APl
+   └─ iouType = "bbox" → Box  AP / AP50 / AP75 / APs / APm / APl
 
-8. Per-category evaluation (6 categories × 2 iouTypes)
-   └─ Extract per-category AP, AP50, AP75 + PR curve data
+9. Per-category evaluation (6 categories × 2 iouTypes)
+   └─ Per-category AP, AP50, AP75 + PR curve data
 
-9. Compute threshold-dependent metrics
-   └─ F1 / Precision / Recall vs confidence threshold sweep (50 steps)
+10. Supplementary metrics at REPORT_THRESHOLD = 0.50
+    ├─ Precision / Recall / F1 (per-class greedy matching @ IoU 0.50)
+    └─ Confusion matrix (class-agnostic greedy matching @ IoU 0.50)
 
-10. Generate 14 evaluation charts + save full results JSON
+11. Generate 15 evaluation charts + save full results JSON
 ```
 
 ---
 
 ### 📈 Results
 
-**Dataset:** CarDD test split — **374 images, 785 annotations**
-**Evaluator:** `pycocotools.cocoeval.COCOeval` in original image coordinates
+**Dataset:** CarDD test split — **374 images, 785 annotations** (0 images failed)
+**Evaluator:** `pycocotools.cocoeval.COCOeval`, native original image coordinates
 **Area ranges:** CarDD non-standard (small < 128², medium 128²–256², large ≥ 256²)
+**Prediction pass:** 97.8 s for 374 images (~0.26 s/image) on an NVIDIA RTX 5070 Laptop GPU. This is wall-clock for the whole loop — image load, forward pass, and RLE encoding of 37,326 masks — not an inference benchmark. It is also power-state dependent: the identical run on battery rather than mains took about 40% longer, with every accuracy metric unchanged.
 
 #### Overall Metrics vs DCN+ (ResNet-101)
 
 | Metric | RF-DETR (Ours) | DCN+ (Paper) | Δ |
 |--------|---------------|-------------|---|
-| **Mask AP** (IoU 0.50:0.95) | **59.9** | 57.0 | **+2.9** |
-| **Mask AP50** | **79.8** | 77.7 | **+2.1** |
-| **Mask AP75** | **60.1** | 58.4 | **+1.7** |
-| **Box AP** (IoU 0.50:0.95) | **63.3** | 60.6 | **+2.7** |
-| **Box AP50** | **79.4** | 78.8 | **+0.6** |
-| **Box AP75** | **65.3** | 64.8 | **+0.5** |
+| **Mask AP** (IoU 0.50:0.95) | **59.5** | 57.0 | **+2.5** |
+| **Mask AP50** | **78.9** | 77.7 | **+1.2** |
+| **Mask AP75** | **59.7** | 58.4 | **+1.3** |
+| **Box AP** (IoU 0.50:0.95) | **63.1** | 60.6 | **+2.5** |
+| **Box AP50** | 78.6 | 78.8 | −0.2 |
+| **Box AP75** | 64.7 | 64.8 | −0.1 |
 
-> RF-DETR achieves higher AP than DCN+ (ResNet-101) across all overall metrics (AP, AP50, AP75) for both mask and box evaluation. Both models are evaluated using `pycocotools.cocoeval.COCOeval` with the CarDD paper's area range configuration. Predictions are projected to original image coordinates before evaluation — a standard step when the model's inference resolution differs from the annotation coordinate space.
+> RF-DETR exceeds DCN+ (ResNet-101) on mask AP, AP50 and AP75, and on box AP. Box AP50 and AP75 differ by ≤ 0.2, which is within rounding and is best read as a tie. Both models are evaluated with `pycocotools.cocoeval.COCOeval` under the CarDD paper's area range configuration, on the same official test split.
 
 #### Size-Stratified AP vs DCN+ (CarDD Area Ranges)
 
-These values use the CarDD paper's non-standard area ranges (small < 128², medium 128²–256², large ≥ 256²), **not** COCO defaults. Our evaluation configures `COCOeval.params.areaRng` to match these CarDD-specific ranges for fair comparison with the DCN+ baseline.
-The DCN+ reference values below are taken from the **DCN+ ResNet-101** row in Table IV of the CarDD paper.
+Reference values are the **DCN+ ResNet-101** row of Table IV in the CarDD paper, which reports APS / APM / APL alongside the overall metrics. The **GT instances** column gives the number of ground-truth instances each figure is averaged over.
 
-| Metric | RF-DETR Mask | DCN+ Mask | Δ Mask | RF-DETR Box | DCN+ Box | Δ Box |
-|--------|-------------|-----------|--------|-------------|----------|-------|
-| **APs** (small < 128²) | **41.2** | 34.6 | **+6.6** | **44.0** | 37.1 | **+6.9** |
-| **APm** (medium 128²–256²) | **54.4** | 44.0 | **+10.4** | **57.5** | 48.0 | **+9.5** |
-| **APl** (large ≥ 256²) | 62.7 | **71.6** | -8.9 | 65.5 | **66.0** | -0.5 |
+| Metric | RF-DETR Mask | DCN+ Mask | Δ Mask | RF-DETR Box | DCN+ Box | Δ Box | GT instances |
+|--------|-------------|-----------|--------|-------------|----------|-------|--------------|
+| **APs** (small < 128²) | **39.4** | 34.6 | **+4.8** | **44.8** | 37.1 | **+7.7** | 260 |
+| **APm** (medium 128²–256²) | **53.9** | 44.0 | **+9.9** | **58.0** | 48.0 | **+10.0** | 261 |
+| **APl** (large ≥ 256²) | **72.1** | 71.6 | **+0.5** | 65.6 | 66.0 | −0.4 | 264 |
 
-> **Note on area ranges:** The CarDD paper defines area ranges as small < 128², medium 128²–256², large ≥ 256², which are significantly larger thresholds than the COCO standard (small < 32², medium 32²–96², large ≥ 96²). This is because car damage instances in real-world images are generally larger than typical COCO objects.
+> **Note on area ranges:** CarDD's thresholds (128², 256²) are much larger than COCO's (32², 96²), because car damage instances in real-world images are generally larger than typical COCO objects.
 >
-> **Note on size-stratified comparison:** RF-DETR improves over the DCN+ ResNet-101 baseline on small and medium-sized damage instances (APs: +6.6 mask, +6.9 box; APm: +10.4 mask, +9.5 box). DCN+ remains stronger on large instances (APl: -8.9 mask, -0.5 box), while RF-DETR still leads on the overall AP, AP50, and AP75 metrics shown above. The small/medium gains may be partly attributable to the transformer architecture's global attention mechanism, which captures long-range context effectively for fine-grained damage detection.
+> **Note on the comparison:** RF-DETR leads on every mask size bin, with the largest margin on medium instances (+9.9). The three bins are near-evenly populated (260 / 261 / 264 of 785), so all three figures are well supported. On box, the small and medium gains are larger still (+7.7, +10.0) while large is a tie.
+
+#### Ground-Truth Support (per class × size bin)
+
+Instance counts behind the numbers above, measured from decoded mask area. This table is the reason the per-class results look the way they do:
+
+| Class | Mask AP | All | Small | Medium | Large | Dominant size |
+|-------|---------|-----|-------|--------|-------|---------------|
+| crack | 20.7 | 70 | **64** | 5 | 1 | small (91%) |
+| scratch | 34.3 | 307 | **128** | 123 | 56 | small (42%) |
+| dent | 37.4 | 236 | 53 | **109** | 74 | medium (46%) |
+| lamp broken | 75.9 | 69 | 13 | 15 | **41** | large (59%) |
+| tire flat | 93.7 | 32 | 1 | 3 | **28** | large (88%) |
+| glass shatter | 94.8 | 71 | 1 | 6 | **64** | large (90%) |
+| **TOTAL** | | **785** | **260** | **261** | **264** | |
+
+> Ordered by AP, the dominant size runs small → small → medium → large → large → large without exception: the weakest classes are the ones made of the smallest objects. Cracks are hairline features (91% fall in the small bin) and score lowest; glass shatter and tire flat are large, well-defined regions and score highest.
+>
+> **Individual cells in this table must not be used to derive per-class size-stratified AP.** Six of them rest on ≤ 6 instances — `crack` large = **1**, `glass shatter` small = **1**, `tire flat` small = **1**, `tire flat` medium = 3, `crack` medium = 5, `glass shatter` medium = 6. An AP over one annotation is a coin flip. The *aggregate* APs / APm / APl above are well supported and are the figures to quote.
 
 #### Per-Category Mask AP
 
-| Class | RF-DETR | DCN+ | Δ |
-|-------|---------|------|---|
-| crack | 24.5 | 16.6 | **+7.9** |
-| dent | 36.8 | 40.5 | −3.7 |
-| glass shatter | **93.4** | 89.6 | **+3.8** |
-| lamp broken | **76.3** | 70.8 | **+5.5** |
-| scratch | 34.8 | 34.3 | +0.5 |
-| tire flat | **93.7** | 90.0 | **+3.7** |
+| Class | RF-DETR | DCN+ | Δ | GT instances |
+|-------|---------|------|---|--------------|
+| crack | **20.7** | 16.6 | **+4.1** | 70 |
+| dent | 37.4 | 40.5 | −3.1 | 236 |
+| glass shatter | **94.8** | 89.6 | **+5.2** | 71 |
+| lamp broken | **75.9** | 70.8 | **+5.1** | 69 |
+| scratch | 34.3 | 34.3 | 0.0 | 307 |
+| tire flat | **93.7** | 90.0 | **+3.7** | 32 |
 
 #### Per-Category Box AP
 
-| Class | RF-DETR | DCN+ | Δ |
-|-------|---------|------|---|
-| crack | 31.3 | 29.6 | +1.7 |
-| dent | 39.6 | 42.2 | −2.6 |
-| glass shatter | **95.2** | 90.1 | **+5.1** |
-| lamp broken | **77.0** | 69.5 | **+7.5** |
-| scratch | 42.1 | 42.3 | −0.2 |
-| tire flat | **94.5** | 90.2 | **+4.3** |
+| Class | RF-DETR | DCN+ | Δ | GT instances |
+|-------|---------|------|---|--------------|
+| crack | 29.4 | 29.6 | −0.2 | 70 |
+| dent | 39.5 | 42.2 | −2.7 | 236 |
+| glass shatter | **95.4** | 90.1 | **+5.3** | 71 |
+| lamp broken | **77.6** | 69.5 | **+8.1** | 69 |
+| scratch | 41.4 | 42.3 | −0.9 | 307 |
+| tire flat | **95.1** | 90.2 | **+4.9** | 32 |
 
 #### Mask vs Box AP (RF-DETR Internal Comparison)
 
 | Metric | Mask | Box | Δ (Box − Mask) |
 |--------|------|-----|----------------|
-| AP | 59.9 | 63.3 | +3.4 |
-| AP50 | 79.8 | 79.4 | −0.4 |
-| AP75 | 60.1 | 65.3 | +5.2 |
+| AP | 59.5 | 63.1 | +3.6 |
+| AP50 | 78.9 | 78.6 | −0.3 |
+| AP75 | 59.7 | 64.7 | +5.0 |
 
-#### Best Threshold (F1)
+> Box and mask AP50 are effectively identical: at a loose IoU the model localises the damage equally well either way. The gap opens at AP75 (+5.0), which is where mask *boundary* precision starts to matter — the cost of segmenting a damage region exactly, rather than merely bounding it.
 
-| Mode | Threshold | Precision | Recall | F1 |
-|------|-----------|-----------|--------|-----|
-| Mask | 0.408 | 0.7034 | 0.6828 | **0.693** |
-| Box | 0.449 | 0.7387 | 0.6446 | **0.6884** |
+#### Precision / Recall / F1
+
+| Mode | Threshold | Precision | Recall | F1 | TP | FP | FN |
+|------|-----------|-----------|--------|-----|----|----|-----|
+| Mask | 0.50 | 0.7835 | 0.6178 | **0.6909** | 485 | 134 | 300 |
+| Box | 0.50 | 0.7803 | 0.6153 | **0.6880** | 483 | 136 | 302 |
+
+These are measured at the fixed `REPORT_THRESHOLD = 0.50`, chosen in advance. For reference, the F1-maximising threshold *selected on this test set* is 0.5306, giving F1 0.6925 — a gain of 0.0016 over the fixed value, so there is no meaningful tuning advantage to be had and the fixed-threshold numbers can be quoted directly.
+
+#### Confusion (mask, IoU 0.50, score ≥ 0.50)
+
+| Outcome | Count |
+|---------|-------|
+| Correctly classified | 485 |
+| Matched but mislabelled | 10 |
+| Missed (no prediction) | 290 |
+| **Total ground truth** | **785** |
+| Background false positives | 124 |
+
+> Class confusion is rare — only 10 of 785 instances are matched by a prediction of the wrong class. The dominant error mode is **missed detections** (290), not misclassification. The confusion matrix is built with class-agnostic greedy matching, so a prediction can claim a ground-truth instance of a different class; this is what makes off-diagonal cells possible.
 
 ### Usage
 
 ```bash
 python Testing/evaluate_rfdetr_cardd_full.py \
-    --images_dir  /path/to/test/images \
-    --annotations /path/to/resized/_annotations.coco.json \
-    --orig_annotations /path/to/original/_annotations.coco.json \
-    --checkpoint  /path/to/checkpoint_best_total.pth \
+    --images_dir       /path/to/CarDD_COCO_original/test \
+    --orig_annotations /path/to/CarDD_COCO_original/test/_annotations.coco.json \
+    --annotations      /path/to/training_export/test/_annotations.coco.json \
+    --checkpoint       /path/to/checkpoint_best_total.pth \
     --resolution  960 \
     --threshold   0.001 \
     --output_json Testing/plots/results.json \
     --plots_dir   Testing/plots
 ```
 
+> `--images_dir` must point at the **original, un-resized** images. Pointing it at a resized copy raises rather than silently rescaling.
+
 ### Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--images_dir` | — | Path to test image directory |
-| `--annotations` | — | Path to **resized** COCO annotation JSON (provides image file list and model class-index mapping) |
-| `--orig_annotations` | `None` | Path to **original** (un-resized) CarDD test annotation JSON for pycocotools evaluation and coordinate projection. If omitted, falls back to `--annotations`. |
+| `--images_dir` | — | Path to the **original, un-resized** test image directory |
+| `--orig_annotations` | `None` | **Required.** Original CarDD test annotation JSON — supplies the image list, scored ground truth, image IDs and true dimensions |
+| `--annotations` | `None` | *Optional.* Annotation JSON of the dataset the model was **trained** on. Not scored, contributes no images; used only to verify the class-index order. Omit it and the hardcoded class list is taken on trust |
 | `--checkpoint` | — | Path to `.pth` model checkpoint |
 | `--resolution` | `960` | RF-DETR inference resolution |
-| `--threshold` | `0.001` | Minimum confidence threshold (low value = evaluate all detections) |
+| `--threshold` | `0.001` | Collection threshold for COCOeval. Keep it low — raising it truncates the recall axis and understates AP |
 | `--output_json` | `results.json` | Output JSON with all metrics and chart data |
 | `--plots_dir` | `./plots` | Output directory for charts |
 
-### Generated Charts (14 total)
+`REPORT_THRESHOLD = 0.50` is a constant in the script header, not a CLI flag. It affects only the P/R/F1 summary and the confusion matrices; AP is independent of it.
+
+### Generated Charts (15 total)
 
 | # | File | Description |
 |---|------|-------------|
 | 1 | `pr_curve_per_category_mask.png` | Per-category Precision–Recall curves (mask). Solid = IoU 0.50, dashed = IoU 0.55–0.95. |
 | 2 | `pr_curve_per_category_box.png` | Per-category Precision–Recall curves (box) |
-| 3 | `f1_vs_threshold_mask.png` | F1 / Precision / Recall vs confidence threshold (mask) |
-| 4 | `f1_vs_threshold_box.png` | F1 / Precision / Recall vs confidence threshold (box) |
+| 3 | `f1_vs_threshold_mask.png` | F1 / Precision / Recall vs confidence threshold (mask), with the fixed operating point and the test-selected oracle both marked |
+| 4 | `f1_vs_threshold_box.png` | As above, for box |
 | 5 | `ap_comparison_bar_mask.png` | Per-category bar chart: RF-DETR vs DCN+ (mask AP) with Δ annotations |
 | 6 | `ap_comparison_bar_box.png` | Per-category bar chart: RF-DETR vs DCN+ (box AP) with Δ annotations |
 | 7 | `overall_radar.png` | Radar chart: AP / AP50 / AP75 for mask & box — RF-DETR vs DCN+ |
-| 8 | `precision_recall_f1_summary.png` | Summary bar: P / R / F1 at best confidence threshold (mask + box) |
-| 9 | `confusion_heatmap_mask.png` | Detection heatmap: TP rate per GT class (mask @ IoU=0.50) |
-| 10 | `confusion_heatmap_box.png` | Detection heatmap: TP rate per GT class (box @ IoU=0.50) |
-| 11 | `rfdetr_mask_vs_box_overall.png` | RF-DETR only: Mask AP vs Box AP grouped bar (AP / AP50 / AP75) |
-| 12 | `rfdetr_mask_vs_box_per_category.png` | RF-DETR only: Mask AP vs Box AP per category |
-| 13 | `comparison_overall_mask_box.png` | 4-way comparison: RF-DETR Mask / Box vs DCN+ Mask / Box (AP / AP50 / AP75) |
-| 14 | `comparison_per_category_mask_box.png` | 4-way per-category: RF-DETR Mask / Box vs DCN+ Mask / Box |
+| 8 | `precision_recall_f1_summary.png` | Summary bar: P / R / F1 at the fixed operating threshold, with the oracle drawn as a dashed outline behind it |
+| 9 | `iou_threshold_ap_curve.png` | Mean AP across categories vs IoU threshold, with DCN+'s published AP50 / AP75 as reference markers |
+| 10 | `confusion_heatmap_mask.png` | Confusion matrix (mask @ IoU 0.50). Rows sum to 1; final column is ground truth claimed by no prediction; background false positives reported beneath |
+| 11 | `confusion_heatmap_box.png` | As above, for box |
+| 12 | `rfdetr_mask_vs_box_overall.png` | RF-DETR only: Mask AP vs Box AP grouped bar (AP / AP50 / AP75) |
+| 13 | `rfdetr_mask_vs_box_per_category.png` | RF-DETR only: Mask AP vs Box AP per category |
+| 14 | `comparison_overall_mask_box.png` | 4-way comparison: RF-DETR Mask / Box vs DCN+ Mask / Box (AP / AP50 / AP75) |
+| 15 | `comparison_per_category_mask_box.png` | 4-way per-category: RF-DETR Mask / Box vs DCN+ Mask / Box |
 
 ---
 
@@ -309,7 +372,9 @@ python Testing/evaluate_rfdetr_cardd_full.py \
 
 ### Script: `Training and Validation/plot_training_metrics.py`
 
-Reads the training log CSV and produces 12 publication-quality charts tracking loss curves, mAP progression, and per-category AP over all training epochs.
+Reads the training log CSV and produces 12 charts tracking loss curves, mAP progression, and per-category AP over all training epochs.
+
+> **These charts are not test-set results.** `val/*` columns are the split RF-DETR scored at the end of each epoch, and `train/*` are training-time losses. Neither is the held-out test set, and the `val/*` numbers are computed with a different evaluator configuration from the results above — the two must not be quoted interchangeably. Every generated figure carries a provenance line stating this.
 
 ### Usage
 
@@ -334,7 +399,7 @@ python "Training and Validation/plot_training_metrics.py" \
 | 2 | `val_map75_mar.png` | Val mAP@75 and Mean Average Recall over epochs |
 | 3 | `val_precision_recall_f1.png` | Val Precision / Recall / F1 over epochs |
 | 4 | `val_per_category_ap.png` | Per-damage-class AP over epochs (2×3 grid) |
-| 5 | `train_loss_total.png` | Total training loss over steps (raw + smoothed) |
+| 5 | `train_loss_total.png` | Total training loss over steps |
 | 6 | `train_loss_components.png` | CE / BBox L1 / GIoU / Mask CE / Mask Dice per step |
 | 7 | `train_loss_auxiliary.png` | Auxiliary decoder layer losses (layers 0–3 + enc) |
 | 8 | `val_ema_vs_live.png` | EMA mAP vs live mAP (box + segm) |
@@ -343,18 +408,23 @@ python "Training and Validation/plot_training_metrics.py" \
 | 11 | `train_cardinality_error.png` | Cardinality error per decoder layer over steps |
 | 12 | `combined_overview.png` | 2×2 dashboard: loss / mAP / P-R-F1 / per-cat AP bar |
 
+> This run logs one row per epoch (20 rows). A rolling mean is applied only when the series is long enough for it to change anything; with 20 points it is not, so the loss charts show a single unsmoothed line rather than an identical curve drawn twice under a "smoothed" label.
+
 ---
 
 ## ⚙️ Requirements
 
+`requirements.txt` lives at the repository root. The `Usage` blocks above run
+from this folder, so install from the root first:
+
 ```bash
-pip install -r requirements.txt
+pip install -r ../../requirements.txt
 ```
 
 ---
 
 ## 📖 References
 
-- **CarDD Dataset & DCN+ Baseline:** Wang, X., Li, W., & Wu, Z. (2023). *CarDD: A New Dataset for Vision-Based Car Damage Detection*. IEEE Transactions on Intelligent Transportation Systems, 24(7), 7202–7214. [DOI: 10.1109/TITS.2023.3258480](https://doi.org/10.1109/TITS.2023.3258480) — [Project Page](https://cardd-ustc.github.io/)
+- **CarDD Dataset & DCN+ Baseline:** Wang, X., Li, W., & Wu, Z. (2023). *CarDD: A New Dataset for Vision-Based Car Damage Detection*. IEEE Transactions on Intelligent Transportation Systems, 24(7), 7202–7214. [DOI: 10.1109/TITS.2023.3258480](https://doi.org/10.1109/TITS.2023.3258480) — [Project Page](https://cardd-ustc.github.io/) — [arXiv:2211.00945](https://arxiv.org/abs/2211.00945)
 - **RF-DETR:** [Roboflow RF-DETR — Real-Time Detection Transformer](https://github.com/roboflow/rf-detr)
-- **Evaluation standard:** COCO-style AP (IoU=0.50:0.95, 101-point interpolation) computed using `pycocotools.cocoeval.COCOeval` with CarDD-specific area ranges for size-stratified metrics.
+- **Evaluation standard:** COCO-style AP (IoU = 0.50:0.95, 101-point interpolation, maxDets 100) computed with `pycocotools.cocoeval.COCOeval` using CarDD-specific area ranges for size-stratified metrics.
