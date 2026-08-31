@@ -3,46 +3,98 @@
   "checkpoint": "D:\\GTU\\Mini Project\\run_detr\\T03_car_damage_training_models\\checkpoint_best_total.pth",
   "resolution": 960,
   "threshold": 0.001,
+  "report_threshold": 0.5,
+  "inputs": {
+    "images_dir": "D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_COCO_original\\test",
+    "training_export": "D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_1152_Coco_multiscale - Copy (2)\\test\\_annotations.coco.json",
+    "orig_annotations": "D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_COCO_original\\test\\_annotations.coco.json",
+    "checkpoint": "D:\\GTU\\Mini Project\\run_detr\\T03_car_damage_training_models\\checkpoint_best_total.pth",
+    "resolution": 960,
+    "threshold": 0.001,
+    "report_threshold": 0.5,
+    "command": "evaluation\\Car Damage\\Testing\\evaluate_rfdetr_cardd_full.py --images_dir D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_COCO_original\\test --orig_annotations D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_COCO_original\\test\\_annotations.coco.json --annotations D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_1152_Coco_multiscale - Copy (2)\\test\\_annotations.coco.json --checkpoint D:\\GTU\\Mini Project\\run_detr\\T03_car_damage_training_models\\checkpoint_best_total.pth --resolution 960 --threshold 0.001 --output_json evaluation\\Car Damage\\Testing\\plots\\results.json --plots_dir evaluation\\Car Damage\\Testing\\plots"
+  },
   "eval_methodology": {
-    "coordinate_space": "original image coordinates (projected from model output)",
+    "coordinate_space": "native original image coordinates; images are fed to the model unresized and masks are used as returned, at the source resolution",
     "headline_evaluator": "pycocotools.cocoeval.COCOeval",
+    "area_ranges": "CarDD: small<128^2, medium 128^2-256^2, large>256^2",
+    "segm_result_keys": "image_id, category_id, segmentation, score (no bbox key: it would make loadRes bin segm detections by box area)",
     "orig_annotations": "D:\\GTU\\Mini Project\\carDD_DETR_dataset\\CarDD_COCO_original\\test\\_annotations.coco.json"
   },
   "dataset": {
     "images": 374,
     "annotations": 785,
-    "note": "CarDD test split (image list from resized annotation file)"
+    "note": "CarDD test split; image list and scored ground truth both come from --orig_annotations"
   },
+  "gt_support": {
+    "crack": {
+      "all": 70,
+      "small": 64,
+      "medium": 5,
+      "large": 1
+    },
+    "dent": {
+      "all": 236,
+      "small": 53,
+      "medium": 109,
+      "large": 74
+    },
+    "glass shatter": {
+      "all": 71,
+      "small": 1,
+      "medium": 6,
+      "large": 64
+    },
+    "lamp broken": {
+      "all": 69,
+      "small": 13,
+      "medium": 15,
+      "large": 41
+    },
+    "scratch": {
+      "all": 307,
+      "small": 128,
+      "medium": 123,
+      "large": 56
+    },
+    "tire flat": {
+      "all": 32,
+      "small": 1,
+      "medium": 3,
+      "large": 28
+    }
+  },
+  "min_support_for_ap": 10,
   "mask_ap": {
-    "AP": 59.9,
-    "AP50": 79.8,
-    "AP75": 60.1,
-    "APs": 41.2,
-    "APm": 54.4,
-    "APl": 62.7,
+    "AP": 59.5,
+    "AP50": 78.9,
+    "AP75": 59.7,
+    "APs": 39.4,
+    "APm": 53.9,
+    "APl": 72.1,
     "per_category": {
-      "dent": 36.8,
-      "scratch": 34.8,
-      "crack": 24.5,
-      "glass shatter": 93.4,
-      "lamp broken": 76.3,
+      "crack": 20.7,
+      "dent": 37.4,
+      "glass shatter": 94.8,
+      "lamp broken": 75.9,
+      "scratch": 34.3,
       "tire flat": 93.7
     }
   },
   "box_ap": {
-    "AP": 63.3,
-    "AP50": 79.4,
-    "AP75": 65.3,
-    "APs": 44.0,
-    "APm": 57.5,
-    "APl": 65.5,
+    "AP": 63.1,
+    "AP50": 78.6,
+    "AP75": 64.7,
+    "APs": 44.8,
+    "APm": 58.0,
+    "APl": 65.6,
     "per_category": {
-      "dent": 39.6,
-      "scratch": 42.1,
-      "crack": 31.3,
-      "glass shatter": 95.2,
-      "lamp broken": 77.0,
-      "tire flat": 94.5
+      "crack": 29.4,
+      "dent": 39.5,
+      "glass shatter": 95.4,
+      "lamp broken": 77.6,
+      "scratch": 41.4,
+      "tire flat": 95.1
     }
   },
   "dcnplus_reference": {
@@ -50,6 +102,9 @@
       "AP": 57.0,
       "AP50": 77.7,
       "AP75": 58.4,
+      "APs": 34.6,
+      "APm": 44.0,
+      "APl": 71.6,
       "per_category": {
         "crack": 16.6,
         "dent": 40.5,
@@ -63,6 +118,9 @@
       "AP": 60.6,
       "AP50": 78.8,
       "AP75": 64.8,
+      "APs": 37.1,
+      "APm": 48.0,
+      "APl": 66.0,
       "per_category": {
         "crack": 29.6,
         "dent": 42.2,
@@ -75,57 +133,268 @@
   },
   "delta_vs_dcnplus": {
     "mask": {
-      "AP": 2.9,
-      "AP50": 2.1,
-      "AP75": 1.7,
+      "AP": 2.5,
+      "AP50": 1.2,
+      "AP75": 1.3,
+      "APs": 4.8,
+      "APm": 9.9,
+      "APl": 0.5,
       "per_category": {
-        "crack": 7.9,
-        "dent": -3.7,
-        "glass shatter": 3.8,
-        "lamp broken": 5.5,
-        "scratch": 0.5,
+        "crack": 4.1,
+        "dent": -3.1,
+        "glass shatter": 5.2,
+        "lamp broken": 5.1,
+        "scratch": 0.0,
         "tire flat": 3.7
       }
     },
     "box": {
-      "AP": 2.7,
-      "AP50": 0.6,
-      "AP75": 0.5,
+      "AP": 2.5,
+      "AP50": -0.2,
+      "AP75": -0.1,
+      "APs": 7.7,
+      "APm": 10.0,
+      "APl": -0.4,
       "per_category": {
-        "crack": 1.7,
-        "dent": -2.6,
-        "glass shatter": 5.1,
-        "lamp broken": 7.5,
-        "scratch": -0.2,
-        "tire flat": 4.3
+        "crack": -0.2,
+        "dent": -2.7,
+        "glass shatter": 5.3,
+        "lamp broken": 8.1,
+        "scratch": -0.9,
+        "tire flat": 4.9
       }
     }
   },
   "mask_vs_box_delta": {
-    "AP": 3.4,
-    "AP50": -0.4,
-    "AP75": 5.2,
+    "AP": 3.6,
+    "AP50": -0.3,
+    "AP75": 5.0,
     "per_category": {
-      "crack": 6.8,
-      "dent": 2.8,
-      "glass shatter": 1.8,
-      "lamp broken": 0.7,
-      "scratch": 7.3,
-      "tire flat": 0.8
+      "crack": 8.7,
+      "dent": 2.1,
+      "glass shatter": 0.6,
+      "lamp broken": 1.7,
+      "scratch": 7.1,
+      "tire flat": 1.4
     }
   },
-  "best_threshold_metrics": {
+  "threshold_metrics": {
+    "operating_point": {
+      "mask": {
+        "threshold": 0.5,
+        "precision": 0.7835,
+        "recall": 0.6178,
+        "f1": 0.6909,
+        "tp": 485,
+        "fp": 134,
+        "fn": 300
+      },
+      "box": {
+        "threshold": 0.5,
+        "precision": 0.7803,
+        "recall": 0.6153,
+        "f1": 0.688,
+        "tp": 483,
+        "fp": 136,
+        "fn": 302
+      }
+    },
+    "oracle_upper_bound": {
+      "selection": "argmax F1 over a 50-point sweep, evaluated on the test set itself",
+      "mask": {
+        "threshold": 0.5306,
+        "precision": 0.8116,
+        "recall": 0.6038,
+        "f1": 0.6925,
+        "tp": 474,
+        "fp": 110,
+        "fn": 311
+      },
+      "box": {
+        "threshold": 0.4286,
+        "precision": 0.7114,
+        "recall": 0.6752,
+        "f1": 0.6928,
+        "tp": 530,
+        "fp": 215,
+        "fn": 255
+      }
+    }
+  },
+  "confusion": {
     "mask": {
-      "threshold": 0.408,
-      "precision": 0.7034,
-      "recall": 0.6828,
-      "f1": 0.693
+      "classes": [
+        "crack",
+        "dent",
+        "glass shatter",
+        "lamp broken",
+        "scratch",
+        "tire flat"
+      ],
+      "gt_per_class": {
+        "crack": 70,
+        "dent": 236,
+        "glass shatter": 71,
+        "lamp broken": 69,
+        "scratch": 307,
+        "tire flat": 32
+      },
+      "matrix": [
+        [
+          34,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          132,
+          0,
+          0,
+          3,
+          0
+        ],
+        [
+          0,
+          0,
+          71,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          54,
+          0,
+          0
+        ],
+        [
+          0,
+          5,
+          1,
+          0,
+          164,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          30
+        ]
+      ],
+      "missed": {
+        "crack": 35,
+        "dent": 101,
+        "glass shatter": 0,
+        "lamp broken": 15,
+        "scratch": 137,
+        "tire flat": 2
+      },
+      "background_fp": {
+        "crack": 18,
+        "dent": 28,
+        "glass shatter": 4,
+        "lamp broken": 11,
+        "scratch": 61,
+        "tire flat": 2
+      },
+      "iou_threshold": 0.5,
+      "score_threshold": 0.5,
+      "note": "rows = ground-truth class, columns = predicted class; class-agnostic greedy matching by descending score"
     },
     "box": {
-      "threshold": 0.449,
-      "precision": 0.7387,
-      "recall": 0.6446,
-      "f1": 0.6884
+      "classes": [
+        "crack",
+        "dent",
+        "glass shatter",
+        "lamp broken",
+        "scratch",
+        "tire flat"
+      ],
+      "gt_per_class": {
+        "crack": 70,
+        "dent": 236,
+        "glass shatter": 71,
+        "lamp broken": 69,
+        "scratch": 307,
+        "tire flat": 32
+      },
+      "matrix": [
+        [
+          32,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          129,
+          0,
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          71,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          55,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          1,
+          0,
+          165,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          30
+        ]
+      ],
+      "missed": {
+        "crack": 37,
+        "dent": 100,
+        "glass shatter": 0,
+        "lamp broken": 14,
+        "scratch": 135,
+        "tire flat": 2
+      },
+      "background_fp": {
+        "crack": 20,
+        "dent": 30,
+        "glass shatter": 4,
+        "lamp broken": 10,
+        "scratch": 56,
+        "tire flat": 2
+      },
+      "iou_threshold": 0.5,
+      "score_threshold": 0.5,
+      "note": "rows = ground-truth class, columns = predicted class; class-agnostic greedy matching by descending score"
     }
   },
   "pr_curves_at_iou50": {
@@ -156,23 +425,23 @@
         "precision": [
           1.0,
           1.0,
-          1.0,
-          0.923,
-          0.88,
-          0.88,
-          0.88,
-          0.839,
-          0.833,
-          0.767,
-          0.661,
-          0.625,
-          0.511,
-          0.511,
-          0.464,
-          0.437,
-          0.222,
-          0.137,
-          0.04,
+          0.933,
+          0.933,
+          0.889,
+          0.864,
+          0.781,
+          0.738,
+          0.738,
+          0.717,
+          0.606,
+          0.606,
+          0.434,
+          0.407,
+          0.347,
+          0.282,
+          0.18,
+          0.082,
+          0.048,
           0.0
         ]
       },
@@ -202,23 +471,23 @@
         "precision": [
           1.0,
           1.0,
-          1.0,
-          0.929,
-          0.914,
-          0.893,
-          0.86,
-          0.842,
-          0.817,
-          0.8,
-          0.759,
-          0.721,
-          0.674,
-          0.601,
-          0.422,
-          0.312,
-          0.153,
-          0.067,
-          0.033,
+          0.96,
+          0.909,
+          0.909,
+          0.89,
+          0.852,
+          0.852,
+          0.847,
+          0.841,
+          0.837,
+          0.777,
+          0.67,
+          0.55,
+          0.471,
+          0.328,
+          0.129,
+          0.062,
+          0.029,
           0.0
         ]
       },
@@ -301,16 +570,16 @@
           1.0,
           1.0,
           1.0,
-          1.0,
-          0.976,
-          0.976,
-          0.957,
-          0.891,
-          0.85,
+          0.974,
+          0.974,
+          0.953,
+          0.898,
+          0.887,
+          0.867,
           0.831,
-          0.753,
-          0.689,
-          0.524,
+          0.806,
+          0.713,
+          0.537,
           0.0
         ]
       },
@@ -341,22 +610,22 @@
           1.0,
           1.0,
           1.0,
-          1.0,
-          0.958,
-          0.92,
-          0.869,
-          0.869,
-          0.85,
-          0.802,
-          0.782,
-          0.72,
-          0.626,
-          0.543,
-          0.467,
-          0.41,
-          0.318,
-          0.192,
-          0.081,
+          0.985,
+          0.985,
+          0.883,
+          0.875,
+          0.86,
+          0.837,
+          0.835,
+          0.755,
+          0.684,
+          0.604,
+          0.53,
+          0.475,
+          0.379,
+          0.263,
+          0.132,
+          0.027,
           0.0
         ]
       },
@@ -402,8 +671,8 @@
           1.0,
           1.0,
           1.0,
-          0.674,
-          0.571
+          0.593,
+          0.593
         ]
       }
     },
@@ -434,22 +703,22 @@
         "precision": [
           1.0,
           1.0,
-          1.0,
-          0.923,
-          0.84,
-          0.84,
-          0.815,
-          0.778,
+          0.889,
+          0.867,
+          0.833,
           0.75,
-          0.68,
+          0.75,
+          0.703,
+          0.652,
+          0.623,
           0.578,
-          0.539,
-          0.479,
-          0.429,
-          0.413,
-          0.335,
-          0.179,
-          0.039,
+          0.506,
+          0.469,
+          0.353,
+          0.321,
+          0.245,
+          0.115,
+          0.031,
           0.0,
           0.0
         ]
@@ -481,22 +750,22 @@
           1.0,
           1.0,
           1.0,
-          0.952,
-          0.931,
-          0.911,
-          0.893,
-          0.842,
-          0.826,
-          0.807,
-          0.769,
-          0.732,
-          0.683,
-          0.622,
-          0.397,
-          0.245,
-          0.167,
-          0.11,
-          0.042,
+          0.905,
+          0.894,
+          0.877,
+          0.86,
+          0.856,
+          0.847,
+          0.828,
+          0.806,
+          0.756,
+          0.674,
+          0.557,
+          0.471,
+          0.328,
+          0.162,
+          0.09,
+          0.05,
           0.0
         ]
       },
@@ -581,15 +850,15 @@
           1.0,
           1.0,
           1.0,
-          1.0,
-          0.979,
-          0.922,
-          0.867,
-          0.846,
-          0.795,
-          0.721,
-          0.663,
-          0.123
+          0.977,
+          0.957,
+          0.906,
+          0.883,
+          0.857,
+          0.819,
+          0.738,
+          0.613,
+          0.131
         ]
       },
       "scratch": {
@@ -619,22 +888,22 @@
           1.0,
           1.0,
           1.0,
-          1.0,
-          0.93,
-          0.879,
-          0.843,
+          0.982,
+          0.958,
+          0.851,
+          0.845,
           0.834,
-          0.804,
-          0.766,
+          0.834,
+          0.834,
           0.755,
-          0.697,
-          0.602,
-          0.504,
-          0.453,
-          0.39,
-          0.318,
-          0.223,
-          0.11,
+          0.703,
+          0.647,
+          0.56,
+          0.507,
+          0.402,
+          0.309,
+          0.2,
+          0.06,
           0.0
         ]
       },
@@ -680,23 +949,24 @@
           1.0,
           1.0,
           1.0,
-          0.674,
-          0.571
+          0.593,
+          0.593
         ]
       }
     }
   },
   "inference_stats": {
-    "time_seconds": 212.8,
+    "time_seconds": 97.8,
     "failed_images": 0,
-    "total_predictions": 37323,
+    "total_predictions": 37326,
+    "predictions_dropped_unknown_class": 74,
     "predictions_per_category": {
-      "crack": 5289,
-      "dent": 14200,
-      "glass shatter": 1950,
-      "lamp broken": 1464,
-      "scratch": 12581,
-      "tire flat": 1839
+      "crack": 5354,
+      "dent": 14076,
+      "glass shatter": 2141,
+      "lamp broken": 1433,
+      "scratch": 12564,
+      "tire flat": 1758
     }
   }
 }
