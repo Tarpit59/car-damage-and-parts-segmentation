@@ -35,6 +35,17 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 
+# A Windows console defaults to cp1252, which cannot encode the arrows, box
+# characters and check marks used throughout the messages below: the very first
+# print raises UnicodeEncodeError and the script dies before doing any work.
+# Force UTF-8 on the streams that support it.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 CLASSES = ["crack", "dent", "glass shatter", "lamp broken", "scratch", "tire flat"]
 
@@ -108,10 +119,73 @@ def _best_epoch_line(ax, epochs, values, color):
 def _savefig(fig, path, tight=True):
     if tight:
         fig.tight_layout()
+    _stamp_source(fig)
     fig.savefig(path, dpi=150, bbox_inches="tight",
                 facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"  [PLOT] Saved → {path}")
+
+
+# ── SMOOTHING ─────────────────────────────────────────────────────────────────
+def _smooth_window(n, divisor=20, min_window=3):
+    """
+    Rolling-mean window for a series of n points, or None when a rolling mean
+    would change nothing.
+
+    The window used to be `n // divisor` floored at 1, which is 1 for any
+    series shorter than 40 points -- and a rolling mean of width 1 is the
+    identity. RF-DETR logs one train row per epoch, so this run has 20 of them
+    and the window was always 1: the "smoothed" curve was the raw curve drawn a
+    second time in a heavier stroke, beneath a legend entry advertising
+    smoothing that never happened. A reader takes the heavy line for a trend
+    and the faint one for noise around it, when they are the same numbers.
+    Returning None instead lets the caller draw a single honest line.
+    """
+    w = max(1, int(n) // divisor)
+    return w if w >= min_window else None
+
+
+def _roll(series, w):
+    """Rolling mean when w is a real window, otherwise the series untouched."""
+    return series.rolling(w, center=True, min_periods=1).mean() if w else series
+
+
+def _plot_series(ax, x, raw, color, label, w, lw=2.5, fill=True,
+                 fill_alpha=0.10, raw_lw=1.2, raw_alpha=0.30):
+    """
+    Plot `raw`, overlaying a rolling mean only when `w` is a real window.
+    Returns the series drawn as the primary line.
+    """
+    if w:
+        ax.plot(x, raw, color=color, lw=raw_lw, alpha=raw_alpha, label="Raw")
+        series = _roll(raw, w)
+        lbl = f"{label} (rolling mean, w={w})"
+    else:
+        series = raw
+        lbl = label
+    ax.plot(x, series, color=color, lw=lw, label=lbl)
+    if fill:
+        ax.fill_between(x, series, alpha=fill_alpha, color=color)
+    return series
+
+
+# ── PROVENANCE ────────────────────────────────────────────────────────────────
+# Every figure here comes from the training CSV: train/* are training-time
+# losses, val/* are the split RF-DETR scored at the end of each epoch. Neither
+# is the held-out test set, and the val/* numbers are NOT the test-set results
+# produced by evaluate_rfdetr_*.py -- those use a different evaluator
+# configuration and must never be quoted interchangeably with these. Each
+# figure carries the line below so a chart lifted out of this directory and
+# dropped into a report still states which split it came from.
+SPLIT_NOTE = ("source: training metrics CSV - train/* = training loss, "
+              "val/* = per-epoch validation split; neither is the held-out "
+              "test set")
+
+
+def _stamp_source(fig):
+    fig.text(0.005, 0.002, SPLIT_NOTE, fontsize=7, color="#8B949E",
+             ha="left", va="bottom")
+
 
 
 # ── DATA LOADING ──────────────────────────────────────────────────────────────
@@ -278,13 +352,8 @@ def plot_train_loss_total(train_df, out):
     fig, ax = plt.subplots(figsize=(12, 5.5))
 
     st = train_df["step_f"]
-    ax.plot(st, train_df["train/loss"], color=C_LOSS, lw=2.0, alpha=0.4, label="Raw")
-
-    # Smoothed
-    w = max(1, len(train_df) // 20)
-    smoothed = train_df["train/loss"].rolling(w, center=True, min_periods=1).mean()
-    ax.plot(st, smoothed, color=C_LOSS, lw=2.5, label=f"Smoothed (w={w})")
-    ax.fill_between(st, smoothed, alpha=0.10, color=C_LOSS)
+    w  = _smooth_window(len(train_df))
+    _plot_series(ax, st, train_df["train/loss"], C_LOSS, "Total loss", w)
 
     ax.set_xlabel("Training Step", fontsize=12)
     ax.set_ylabel("Total Loss", fontsize=12)
@@ -313,7 +382,7 @@ def plot_train_loss_components(train_df, out):
                  fontsize=14, fontweight="bold", color="#E6EDF3", y=1.01)
 
     st = train_df["step_f"]
-    w  = max(1, len(train_df) // 20)
+    w  = _smooth_window(len(train_df))
 
     for idx, (label, (col_name, color)) in enumerate(components.items()):
         ax = axes[idx // 3][idx % 3]
@@ -321,11 +390,8 @@ def plot_train_loss_components(train_df, out):
             ax.set_visible(False)
             continue
 
-        raw      = train_df[col_name]
-        smoothed = raw.rolling(w, center=True, min_periods=1).mean()
-        ax.plot(st, raw,      color=color, lw=1.2, alpha=0.30)
-        ax.plot(st, smoothed, color=color, lw=2.2, label=label)
-        ax.fill_between(st, smoothed, alpha=0.12, color=color)
+        _plot_series(ax, st, train_df[col_name], color, label, w,
+                     lw=2.2, fill_alpha=0.12)
 
         ax.set_title(label, fontsize=11, fontweight="bold", color=color)
         ax.set_xlabel("Step", fontsize=9)
@@ -335,7 +401,7 @@ def plot_train_loss_components(train_df, out):
     ax = axes[1][2]
     for label, (col_name, color) in components.items():
         if col_name in train_df.columns:
-            sm = train_df[col_name].rolling(w, center=True, min_periods=1).mean()
+            sm = _roll(train_df[col_name], w)
             ax.plot(st, sm, color=color, lw=1.8, label=label)
     ax.set_title("All Components (overlay)", fontsize=11, fontweight="bold")
     ax.set_xlabel("Step"); ax.set_ylabel("Loss")
@@ -365,13 +431,13 @@ def plot_train_loss_auxiliary(train_df, out):
                  fontsize=14, fontweight="bold", color="#E6EDF3", y=1.01)
 
     st = train_df["step_f"]
-    w  = max(1, len(train_df) // 20)
+    w  = _smooth_window(len(train_df))
 
     for idx, (group_label, cols) in enumerate(aux_groups.items()):
         ax = axes[idx // 2][idx % 2]
         for ci, (col, lbl) in enumerate(zip(cols, layer_labels)):
             if col in train_df.columns:
-                sm = train_df[col].rolling(w, center=True, min_periods=1).mean()
+                sm = _roll(train_df[col], w)
                 ax.plot(st, sm, color=layer_colors[ci], lw=1.8, label=lbl)
 
         ax.set_title(group_label, fontsize=11, fontweight="bold")
@@ -509,7 +575,7 @@ def plot_cardinality_error(train_df, out):
     fig, ax = plt.subplots(figsize=(12, 5.0))
 
     st = train_df["step_f"]
-    w  = max(1, len(train_df) // 20)
+    w  = _smooth_window(len(train_df))
 
     layers = {
         "Main":    ("train/cardinality_error",   "#58A6FF"),
@@ -522,7 +588,7 @@ def plot_cardinality_error(train_df, out):
 
     for lbl, (col, color) in layers.items():
         if col in train_df.columns:
-            sm = train_df[col].rolling(w, center=True, min_periods=1).mean()
+            sm = _roll(train_df[col], w)
             ax.plot(st, sm, color=color, lw=1.8, label=lbl)
 
     ax.set_xlabel("Training Step", fontsize=12)
@@ -544,16 +610,13 @@ def plot_combined_dashboard(val_df, train_df, out):
 
     ep = val_df["epoch_f"]
     st = train_df["step_f"]
-    w  = max(1, len(train_df) // 20)
+    w  = _smooth_window(len(train_df))
 
     # ─── Top-left: Training loss ───────────────────────────────────────────
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_facecolor("#161B22")
-    raw      = train_df["train/loss"]
-    smoothed = raw.rolling(w, center=True, min_periods=1).mean()
-    ax1.plot(st, raw,      color=C_LOSS, lw=1.0, alpha=0.30)
-    ax1.plot(st, smoothed, color=C_LOSS, lw=2.5, label="Total loss (smoothed)")
-    ax1.fill_between(st, smoothed, alpha=0.10, color=C_LOSS)
+    _plot_series(ax1, st, train_df["train/loss"], C_LOSS, "Total loss", w,
+                 raw_lw=1.0)
     ax1.set_title("Training Loss", fontsize=12, fontweight="bold")
     ax1.set_xlabel("Step"); ax1.set_ylabel("Loss")
     ax1.legend(fontsize=9)
