@@ -56,3 +56,9 @@ Thumbs.db
 with_tile_inference/
 .agent/
 Report/
+cd_history/
+# next-semester work, kept locally and not published yet
+dp2_*
+
+# machine-specific dataset and checkpoint locations
+local_paths.json
