@@ -1,0 +1,2849 @@
+{
+  "script": "physical_plausibility_layer",
+  "dataset": {
+    "name": "Humans-in-the-Loop (HIL)",
+    "split": "all annotated images",
+    "data_root": ".../Car parts dataset/File1",
+    "images_listed": 814,
+    "images_missing_on_disk": 0,
+    "images_scored": 814,
+    "gt_instances_scored": 6482,
+    "classes_evaluated": [
+      "crack",
+      "dent",
+      "glass shatter",
+      "lamp broken",
+      "scratch"
+    ],
+    "classes_not_evaluated": [
+      "tire flat"
+    ],
+    "gt_instances_per_source_label": {
+      "Broken part": 1500,
+      "Scratch": 3242,
+      "Dent": 1664,
+      "Cracked": 76
+    },
+    "gt_instances_per_class": {
+      "glass shatter | lamp broken": 1500,
+      "scratch": 3242,
+      "dent": 1664,
+      "crack": 76
+    },
+    "gt_instances_per_class_note": "Each ground-truth instance is counted once. A key joined by '|' is a source label that either of those classes may match, so the two cannot be told apart and share that support.",
+    "label_map": {
+      "Scratch": [
+        "scratch"
+      ],
+      "Dent": [
+        "dent"
+      ],
+      "Cracked": [
+        "crack"
+      ],
+      "Broken part": [
+        "glass shatter",
+        "lamp broken"
+      ]
+    },
+    "ignored_labels": [
+      "Corrosion",
+      "Flaking",
+      "Missing part",
+      "Paint chip"
+    ],
+    "notes": [
+      "The published HIL folders are SWAPPED: the directory named 'Car parts dataset' is the one holding damage annotations.",
+      "No HIL label corresponds to tire flat, so that class is not evaluated here and its predictions are discarded before scoring.",
+      "The label 'Broken part' is accepted as EITHER glass shatter OR lamp broken. HIL does not distinguish the two, so neither class's precision on this dataset is a clean measurement, and the pair should be read as one merged class.",
+      "Labels ['Corrosion', 'Flaking', 'Missing part', 'Paint chip'] carry no damage-class meaning for this study and become IGNORE regions: a prediction overlapping one by >= 0.50 of its own area is counted as neither a hit nor an error."
+    ]
+  },
+  "parameters": {
+    "dataset": "hil",
+    "damage_ckpt": "checkpoint_best_total.pth",
+    "parts_ckpt": "checkpoint_best_total_02.1.pth",
+    "images_dir": ".../CarDD_COCO_original/test",
+    "annotations": "_annotations.coco.json",
+    "data_root": ".../Car parts dataset/File1",
+    "broken_part": "superclass",
+    "ignore_overlap": 0.5,
+    "damage_resolution": 960,
+    "parts_resolution": 960,
+    "infer_threshold": 0.05,
+    "parts_threshold": 0.45,
+    "operating_threshold": 0.5,
+    "iou_threshold": 0.5,
+    "policy": "majority",
+    "part_nms_iou": 0.3,
+    "overlap_threshold": 0.2,
+    "attribution_overlap": 0.15,
+    "unknown_dominance": 0.6,
+    "unknown": "keep",
+    "no_evidence": "keep",
+    "sweep": "0.05,0.10,0.20,0.30,0.40,0.50",
+    "bootstrap": 5000,
+    "seed": 0,
+    "fp16": true,
+    "n_images": 0,
+    "out_dir": ".../dissertation/results",
+    "self_check": false,
+    "with_models": false,
+    "n_sample": 40,
+    "hil_parts_root": ".../Car damages dataset/File1"
+  },
+  "primary": {
+    "policy": "majority",
+    "threshold": 0.5,
+    "threshold_provenance": "Reported as the primary point only. It was not derived on a held-out split, so no claim rests on it alone: every statistic is reported across the full confidence sweep below."
+  },
+  "images": 814,
+  "predictions_at_operating_threshold": 757,
+  "parts_preproc_removed": {
+    "dedup": 76,
+    "caps": 194
+  },
+  "images_with_zero_parts": 0,
+  "median_parts_per_image": 13,
+  "median_part_classes_per_image": 12,
+  "sweep": {
+    "set": {
+      "0.050": {
+        "threshold": 0.05,
+        "predictions_scored": 30427,
+        "precision_base": 0.0355,
+        "precision_layer": 0.0355,
+        "d_precision": -4e-05,
+        "d_precision_ci": [
+          -0.00049,
+          0.00039
+        ],
+        "recall_base": 0.1668,
+        "recall_layer": 0.1604,
+        "d_recall": -0.00633,
+        "d_recall_ci": [
+          -0.00849,
+          -0.00437
+        ],
+        "f1_base": 0.0586,
+        "f1_layer": 0.0581,
+        "d_f1": -0.00045,
+        "d_f1_ci": [
+          -0.00119,
+          0.00023
+        ],
+        "gt": 6482,
+        "TP_base": 1081,
+        "TP_layer": 1040,
+        "FP_base": 29346,
+        "FP_layer": 28264,
+        "excused_base": 1479,
+        "excused_layer": 1433,
+        "FP_cut_pct": 3.687,
+        "FP_cut_ci": [
+          3.285,
+          4.124
+        ],
+        "rejected_fp": 1078,
+        "rejected_tp": 46,
+        "rejection_precision": 0.9591,
+        "rejection_precision_ci": [
+          0.9462,
+          0.9707
+        ],
+        "impossible_pct_overall": 3.937,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 4815,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 374,
+            "judged": 15156,
+            "abstain": 1307,
+            "rate": 2.47,
+            "ci": [
+              1.97,
+              3.04
+            ]
+          },
+          "glass shatter": {
+            "events": 127,
+            "judged": 487,
+            "abstain": 19,
+            "rate": 26.08,
+            "ci": [
+              21.65,
+              30.43
+            ]
+          },
+          "lamp broken": {
+            "events": 562,
+            "judged": 1130,
+            "abstain": 373,
+            "rate": 49.73,
+            "ci": [
+              45.82,
+              53.65
+            ]
+          },
+          "scratch": {
+            "events": 106,
+            "judged": 8102,
+            "abstain": 517,
+            "rate": 1.31,
+            "ci": [
+              0.94,
+              1.73
+            ]
+          }
+        }
+      },
+      "0.100": {
+        "threshold": 0.1,
+        "predictions_scored": 9555,
+        "precision_base": 0.0833,
+        "precision_layer": 0.0838,
+        "d_precision": 0.00047,
+        "d_precision_ci": [
+          -0.00051,
+          0.00135
+        ],
+        "recall_base": 0.1228,
+        "recall_layer": 0.1199,
+        "d_recall": -0.00293,
+        "d_recall_ci": [
+          -0.00437,
+          -0.00165
+        ],
+        "f1_base": 0.0993,
+        "f1_layer": 0.0986,
+        "d_f1": -0.00065,
+        "d_f1_ci": [
+          -0.00179,
+          0.00037
+        ],
+        "gt": 6482,
+        "TP_base": 796,
+        "TP_layer": 777,
+        "FP_base": 8759,
+        "FP_layer": 8498,
+        "excused_base": 458,
+        "excused_layer": 450,
+        "FP_cut_pct": 2.98,
+        "FP_cut_ci": [
+          2.51,
+          3.489
+        ],
+        "rejected_fp": 260,
+        "rejected_tp": 21,
+        "rejection_precision": 0.9253,
+        "rejection_precision_ci": [
+          0.8912,
+          0.955
+        ],
+        "impossible_pct_overall": 3.009,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 1399,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 86,
+            "judged": 4749,
+            "abstain": 256,
+            "rate": 1.81,
+            "ci": [
+              1.23,
+              2.49
+            ]
+          },
+          "glass shatter": {
+            "events": 28,
+            "judged": 240,
+            "abstain": 6,
+            "rate": 11.67,
+            "ci": [
+              7.56,
+              16.26
+            ]
+          },
+          "lamp broken": {
+            "events": 146,
+            "judged": 474,
+            "abstain": 64,
+            "rate": 30.8,
+            "ci": [
+              26.27,
+              35.27
+            ]
+          },
+          "scratch": {
+            "events": 28,
+            "judged": 2709,
+            "abstain": 116,
+            "rate": 1.03,
+            "ci": [
+              0.59,
+              1.56
+            ]
+          }
+        }
+      },
+      "0.200": {
+        "threshold": 0.2,
+        "predictions_scored": 2987,
+        "precision_base": 0.1885,
+        "precision_layer": 0.19,
+        "d_precision": 0.0015,
+        "d_precision_ci": [
+          -0.00078,
+          0.0036
+        ],
+        "recall_base": 0.0869,
+        "recall_layer": 0.0855,
+        "d_recall": -0.00139,
+        "d_recall_ci": [
+          -0.00252,
+          -0.00047
+        ],
+        "f1_base": 0.1189,
+        "f1_layer": 0.1179,
+        "d_f1": -0.00102,
+        "d_f1_ci": [
+          -0.00248,
+          0.00017
+        ],
+        "gt": 6482,
+        "TP_base": 563,
+        "TP_layer": 554,
+        "FP_base": 2424,
+        "FP_layer": 2362,
+        "excused_base": 157,
+        "excused_layer": 152,
+        "FP_cut_pct": 2.558,
+        "FP_cut_ci": [
+          1.799,
+          3.403
+        ],
+        "rejected_fp": 61,
+        "rejected_tp": 10,
+        "rejection_precision": 0.8592,
+        "rejection_precision_ci": [
+          0.7586,
+          0.9419
+        ],
+        "impossible_pct_overall": 2.492,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 333,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 19,
+            "judged": 1480,
+            "abstain": 52,
+            "rate": 1.28,
+            "ci": [
+              0.47,
+              2.33
+            ]
+          },
+          "glass shatter": {
+            "events": 6,
+            "judged": 137,
+            "abstain": 2,
+            "rate": 4.38,
+            "ci": [
+              0.75,
+              8.7
+            ]
+          },
+          "lamp broken": {
+            "events": 45,
+            "judged": 209,
+            "abstain": 11,
+            "rate": 21.53,
+            "ci": [
+              15.85,
+              27.31
+            ]
+          },
+          "scratch": {
+            "events": 6,
+            "judged": 891,
+            "abstain": 29,
+            "rate": 0.67,
+            "ci": [
+              0.12,
+              1.39
+            ]
+          }
+        }
+      },
+      "0.300": {
+        "threshold": 0.3,
+        "predictions_scored": 1579,
+        "precision_base": 0.2761,
+        "precision_layer": 0.2791,
+        "d_precision": 0.00298,
+        "d_precision_ci": [
+          0.00082,
+          0.00515
+        ],
+        "recall_base": 0.0673,
+        "recall_layer": 0.067,
+        "d_recall": -0.00031,
+        "d_recall_ci": [
+          -0.00079,
+          0.0
+        ],
+        "f1_base": 0.1082,
+        "f1_layer": 0.108,
+        "d_f1": -0.00017,
+        "d_f1_ci": [
+          -0.00094,
+          0.00036
+        ],
+        "gt": 6482,
+        "TP_base": 436,
+        "TP_layer": 434,
+        "FP_base": 1143,
+        "FP_layer": 1121,
+        "excused_base": 94,
+        "excused_layer": 90,
+        "FP_cut_pct": 1.925,
+        "FP_cut_ci": [
+          1.158,
+          2.807
+        ],
+        "rejected_fp": 21,
+        "rejected_tp": 3,
+        "rejection_precision": 0.875,
+        "rejection_precision_ci": [
+          0.7143,
+          1.0
+        ],
+        "impossible_pct_overall": 1.72,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 174,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 7,
+            "judged": 782,
+            "abstain": 26,
+            "rate": 0.9,
+            "ci": [
+              0.25,
+              1.74
+            ]
+          },
+          "glass shatter": {
+            "events": 2,
+            "judged": 92,
+            "abstain": 1,
+            "rate": 2.17,
+            "ci": [
+              0.0,
+              5.62
+            ]
+          },
+          "lamp broken": {
+            "events": 15,
+            "judged": 118,
+            "abstain": 4,
+            "rate": 12.71,
+            "ci": [
+              7.21,
+              18.75
+            ]
+          },
+          "scratch": {
+            "events": 4,
+            "judged": 462,
+            "abstain": 14,
+            "rate": 0.87,
+            "ci": [
+              0.2,
+              1.8
+            ]
+          }
+        }
+      },
+      "0.400": {
+        "threshold": 0.4,
+        "predictions_scored": 1022,
+        "precision_base": 0.3376,
+        "precision_layer": 0.3416,
+        "d_precision": 0.00401,
+        "d_precision_ci": [
+          0.00192,
+          0.0064
+        ],
+        "recall_base": 0.0532,
+        "recall_layer": 0.0532,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.092,
+        "f1_layer": 0.0921,
+        "d_f1": 0.00015,
+        "d_f1_ci": [
+          7e-05,
+          0.00024
+        ],
+        "gt": 6482,
+        "TP_base": 345,
+        "TP_layer": 345,
+        "FP_base": 677,
+        "FP_layer": 665,
+        "excused_base": 56,
+        "excused_layer": 54,
+        "FP_cut_pct": 1.773,
+        "FP_cut_ci": [
+          0.866,
+          2.813
+        ],
+        "rejected_fp": 11,
+        "rejected_tp": 1,
+        "rejection_precision": 0.9167,
+        "rejection_precision_ci": [
+          0.7143,
+          1.0
+        ],
+        "impossible_pct_overall": 1.331,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 95,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 3,
+            "judged": 509,
+            "abstain": 15,
+            "rate": 0.59,
+            "ci": [
+              0.0,
+              1.35
+            ]
+          },
+          "glass shatter": {
+            "events": 1,
+            "judged": 76,
+            "abstain": 1,
+            "rate": 1.32,
+            "ci": [
+              0.0,
+              4.5
+            ]
+          },
+          "lamp broken": {
+            "events": 7,
+            "judged": 80,
+            "abstain": 3,
+            "rate": 8.75,
+            "ci": [
+              3.12,
+              15.19
+            ]
+          },
+          "scratch": {
+            "events": 3,
+            "judged": 292,
+            "abstain": 7,
+            "rate": 1.03,
+            "ci": [
+              0.0,
+              2.34
+            ]
+          }
+        }
+      },
+      "0.500": {
+        "threshold": 0.5,
+        "predictions_scored": 720,
+        "precision_base": 0.3806,
+        "precision_layer": 0.3821,
+        "d_precision": 0.00159,
+        "d_precision_ci": [
+          0.0,
+          0.00371
+        ],
+        "recall_base": 0.0423,
+        "recall_layer": 0.0423,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.0761,
+        "f1_layer": 0.0761,
+        "d_f1": 3e-05,
+        "d_f1_ci": [
+          0.0,
+          7e-05
+        ],
+        "gt": 6482,
+        "TP_base": 274,
+        "TP_layer": 274,
+        "FP_base": 446,
+        "FP_layer": 443,
+        "excused_base": 37,
+        "excused_layer": 35,
+        "FP_cut_pct": 0.673,
+        "FP_cut_ci": [
+          0.0,
+          1.57
+        ],
+        "rejected_fp": 3,
+        "rejected_tp": 0,
+        "rejection_precision": 1.0,
+        "rejection_precision_ci": [
+          1.0,
+          1.0
+        ],
+        "impossible_pct_overall": 0.678,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 54,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 1,
+            "judged": 383,
+            "abstain": 11,
+            "rate": 0.26,
+            "ci": [
+              0.0,
+              0.83
+            ]
+          },
+          "glass shatter": {
+            "events": 0,
+            "judged": 57,
+            "abstain": 1,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "lamp broken": {
+            "events": 2,
+            "judged": 56,
+            "abstain": 1,
+            "rate": 3.57,
+            "ci": [
+              0.0,
+              9.23
+            ]
+          },
+          "scratch": {
+            "events": 2,
+            "judged": 188,
+            "abstain": 6,
+            "rate": 1.06,
+            "ci": [
+              0.0,
+              2.76
+            ]
+          }
+        }
+      }
+    },
+    "dominant": {
+      "0.050": {
+        "threshold": 0.05,
+        "predictions_scored": 30427,
+        "precision_base": 0.0355,
+        "precision_layer": 0.0356,
+        "d_precision": 7e-05,
+        "d_precision_ci": [
+          -0.00038,
+          0.0005
+        ],
+        "recall_base": 0.1668,
+        "recall_layer": 0.1608,
+        "d_recall": -0.00602,
+        "d_recall_ci": [
+          -0.00815,
+          -0.00406
+        ],
+        "f1_base": 0.0586,
+        "f1_layer": 0.0583,
+        "d_f1": -0.00029,
+        "d_f1_ci": [
+          -0.00101,
+          0.00039
+        ],
+        "gt": 6482,
+        "TP_base": 1081,
+        "TP_layer": 1042,
+        "FP_base": 29346,
+        "FP_layer": 28228,
+        "excused_base": 1479,
+        "excused_layer": 1425,
+        "FP_cut_pct": 3.81,
+        "FP_cut_ci": [
+          3.39,
+          4.263
+        ],
+        "rejected_fp": 1116,
+        "rejected_tp": 42,
+        "rejection_precision": 0.9637,
+        "rejection_precision_ci": [
+          0.9516,
+          0.9745
+        ],
+        "impossible_pct_overall": 4.086,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 4815,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 443,
+            "judged": 15138,
+            "abstain": 1325,
+            "rate": 2.93,
+            "ci": [
+              2.36,
+              3.58
+            ]
+          },
+          "glass shatter": {
+            "events": 207,
+            "judged": 473,
+            "abstain": 33,
+            "rate": 43.76,
+            "ci": [
+              38.94,
+              48.52
+            ]
+          },
+          "lamp broken": {
+            "events": 483,
+            "judged": 1127,
+            "abstain": 376,
+            "rate": 42.86,
+            "ci": [
+              38.99,
+              46.66
+            ]
+          },
+          "scratch": {
+            "events": 78,
+            "judged": 8085,
+            "abstain": 534,
+            "rate": 0.96,
+            "ci": [
+              0.64,
+              1.36
+            ]
+          }
+        }
+      },
+      "0.100": {
+        "threshold": 0.1,
+        "predictions_scored": 9555,
+        "precision_base": 0.0833,
+        "precision_layer": 0.0841,
+        "d_precision": 0.00077,
+        "d_precision_ci": [
+          -0.00017,
+          0.00166
+        ],
+        "recall_base": 0.1228,
+        "recall_layer": 0.1202,
+        "d_recall": -0.00262,
+        "d_recall_ci": [
+          -0.00399,
+          -0.0014
+        ],
+        "f1_base": 0.0993,
+        "f1_layer": 0.0989,
+        "d_f1": -0.00033,
+        "d_f1_ci": [
+          -0.00143,
+          0.00067
+        ],
+        "gt": 6482,
+        "TP_base": 796,
+        "TP_layer": 779,
+        "FP_base": 8759,
+        "FP_layer": 8486,
+        "excused_base": 458,
+        "excused_layer": 446,
+        "FP_cut_pct": 3.117,
+        "FP_cut_ci": [
+          2.615,
+          3.679
+        ],
+        "rejected_fp": 272,
+        "rejected_tp": 19,
+        "rejection_precision": 0.9347,
+        "rejection_precision_ci": [
+          0.9027,
+          0.9625
+        ],
+        "impossible_pct_overall": 3.161,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 1399,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 104,
+            "judged": 4741,
+            "abstain": 264,
+            "rate": 2.19,
+            "ci": [
+              1.51,
+              2.96
+            ]
+          },
+          "glass shatter": {
+            "events": 74,
+            "judged": 234,
+            "abstain": 12,
+            "rate": 31.62,
+            "ci": [
+              25.11,
+              38.1
+            ]
+          },
+          "lamp broken": {
+            "events": 102,
+            "judged": 472,
+            "abstain": 66,
+            "rate": 21.61,
+            "ci": [
+              17.72,
+              25.46
+            ]
+          },
+          "scratch": {
+            "events": 22,
+            "judged": 2707,
+            "abstain": 118,
+            "rate": 0.81,
+            "ci": [
+              0.42,
+              1.28
+            ]
+          }
+        }
+      },
+      "0.200": {
+        "threshold": 0.2,
+        "predictions_scored": 2987,
+        "precision_base": 0.1885,
+        "precision_layer": 0.1909,
+        "d_precision": 0.00244,
+        "d_precision_ci": [
+          0.00016,
+          0.00461
+        ],
+        "recall_base": 0.0869,
+        "recall_layer": 0.0856,
+        "d_recall": -0.00123,
+        "d_recall_ci": [
+          -0.00227,
+          -0.00043
+        ],
+        "f1_base": 0.1189,
+        "f1_layer": 0.1182,
+        "d_f1": -0.00069,
+        "d_f1_ci": [
+          -0.00207,
+          0.00044
+        ],
+        "gt": 6482,
+        "TP_base": 563,
+        "TP_layer": 555,
+        "FP_base": 2424,
+        "FP_layer": 2352,
+        "excused_base": 157,
+        "excused_layer": 151,
+        "FP_cut_pct": 2.97,
+        "FP_cut_ci": [
+          2.152,
+          3.897
+        ],
+        "rejected_fp": 71,
+        "rejected_tp": 9,
+        "rejection_precision": 0.8875,
+        "rejection_precision_ci": [
+          0.8,
+          0.9583
+        ],
+        "impossible_pct_overall": 2.823,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 333,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 24,
+            "judged": 1479,
+            "abstain": 53,
+            "rate": 1.62,
+            "ci": [
+              0.7,
+              2.77
+            ]
+          },
+          "glass shatter": {
+            "events": 30,
+            "judged": 136,
+            "abstain": 3,
+            "rate": 22.06,
+            "ci": [
+              14.71,
+              29.71
+            ]
+          },
+          "lamp broken": {
+            "events": 28,
+            "judged": 208,
+            "abstain": 12,
+            "rate": 13.46,
+            "ci": [
+              8.78,
+              18.36
+            ]
+          },
+          "scratch": {
+            "events": 4,
+            "judged": 890,
+            "abstain": 30,
+            "rate": 0.45,
+            "ci": [
+              0.0,
+              1.08
+            ]
+          }
+        }
+      },
+      "0.300": {
+        "threshold": 0.3,
+        "predictions_scored": 1579,
+        "precision_base": 0.2761,
+        "precision_layer": 0.281,
+        "d_precision": 0.00488,
+        "d_precision_ci": [
+          0.00277,
+          0.00715
+        ],
+        "recall_base": 0.0673,
+        "recall_layer": 0.0671,
+        "d_recall": -0.00015,
+        "d_recall_ci": [
+          -0.00049,
+          0.0
+        ],
+        "f1_base": 0.1082,
+        "f1_layer": 0.1083,
+        "d_f1": 0.00017,
+        "d_f1_ci": [
+          -0.00041,
+          0.00052
+        ],
+        "gt": 6482,
+        "TP_base": 436,
+        "TP_layer": 435,
+        "FP_base": 1143,
+        "FP_layer": 1113,
+        "excused_base": 94,
+        "excused_layer": 89,
+        "FP_cut_pct": 2.625,
+        "FP_cut_ci": [
+          1.704,
+          3.646
+        ],
+        "rejected_fp": 29,
+        "rejected_tp": 2,
+        "rejection_precision": 0.9355,
+        "rejection_precision_ci": [
+          0.8286,
+          1.0
+        ],
+        "impossible_pct_overall": 2.214,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 174,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 10,
+            "judged": 781,
+            "abstain": 27,
+            "rate": 1.28,
+            "ci": [
+              0.42,
+              2.33
+            ]
+          },
+          "glass shatter": {
+            "events": 16,
+            "judged": 92,
+            "abstain": 1,
+            "rate": 17.39,
+            "ci": [
+              9.8,
+              25.56
+            ]
+          },
+          "lamp broken": {
+            "events": 8,
+            "judged": 118,
+            "abstain": 4,
+            "rate": 6.78,
+            "ci": [
+              2.68,
+              11.65
+            ]
+          },
+          "scratch": {
+            "events": 2,
+            "judged": 461,
+            "abstain": 15,
+            "rate": 0.43,
+            "ci": [
+              0.0,
+              1.12
+            ]
+          }
+        }
+      },
+      "0.400": {
+        "threshold": 0.4,
+        "predictions_scored": 1022,
+        "precision_base": 0.3376,
+        "precision_layer": 0.344,
+        "d_precision": 0.00639,
+        "d_precision_ci": [
+          0.00371,
+          0.00947
+        ],
+        "recall_base": 0.0532,
+        "recall_layer": 0.0532,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.092,
+        "f1_layer": 0.0922,
+        "d_f1": 0.00023,
+        "d_f1_ci": [
+          0.00013,
+          0.00035
+        ],
+        "gt": 6482,
+        "TP_base": 345,
+        "TP_layer": 345,
+        "FP_base": 677,
+        "FP_layer": 658,
+        "excused_base": 56,
+        "excused_layer": 54,
+        "FP_cut_pct": 2.806,
+        "FP_cut_ci": [
+          1.644,
+          4.112
+        ],
+        "rejected_fp": 18,
+        "rejected_tp": 1,
+        "rejection_precision": 0.9474,
+        "rejection_precision_ci": [
+          0.8213,
+          1.0
+        ],
+        "impossible_pct_overall": 2.0,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 95,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 3,
+            "judged": 508,
+            "abstain": 16,
+            "rate": 0.59,
+            "ci": [
+              0.0,
+              1.35
+            ]
+          },
+          "glass shatter": {
+            "events": 13,
+            "judged": 76,
+            "abstain": 1,
+            "rate": 17.11,
+            "ci": [
+              8.86,
+              26.19
+            ]
+          },
+          "lamp broken": {
+            "events": 4,
+            "judged": 80,
+            "abstain": 3,
+            "rate": 5.0,
+            "ci": [
+              1.18,
+              10.0
+            ]
+          },
+          "scratch": {
+            "events": 1,
+            "judged": 291,
+            "abstain": 8,
+            "rate": 0.34,
+            "ci": [
+              0.0,
+              1.12
+            ]
+          }
+        }
+      },
+      "0.500": {
+        "threshold": 0.5,
+        "predictions_scored": 720,
+        "precision_base": 0.3806,
+        "precision_layer": 0.3854,
+        "d_precision": 0.00482,
+        "d_precision_ci": [
+          0.00203,
+          0.00837
+        ],
+        "recall_base": 0.0423,
+        "recall_layer": 0.0423,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.0761,
+        "f1_layer": 0.0762,
+        "d_f1": 0.0001,
+        "d_f1_ci": [
+          4e-05,
+          0.00016
+        ],
+        "gt": 6482,
+        "TP_base": 274,
+        "TP_layer": 274,
+        "FP_base": 446,
+        "FP_layer": 437,
+        "excused_base": 37,
+        "excused_layer": 35,
+        "FP_cut_pct": 2.018,
+        "FP_cut_ci": [
+          0.871,
+          3.472
+        ],
+        "rejected_fp": 9,
+        "rejected_tp": 0,
+        "rejection_precision": 1.0,
+        "rejection_precision_ci": [
+          1.0,
+          1.0
+        ],
+        "impossible_pct_overall": 1.493,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 54,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 1,
+            "judged": 383,
+            "abstain": 11,
+            "rate": 0.26,
+            "ci": [
+              0.0,
+              0.83
+            ]
+          },
+          "glass shatter": {
+            "events": 8,
+            "judged": 57,
+            "abstain": 1,
+            "rate": 14.04,
+            "ci": [
+              5.66,
+              24.0
+            ]
+          },
+          "lamp broken": {
+            "events": 2,
+            "judged": 56,
+            "abstain": 1,
+            "rate": 3.57,
+            "ci": [
+              0.0,
+              9.23
+            ]
+          },
+          "scratch": {
+            "events": 0,
+            "judged": 187,
+            "abstain": 7,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      }
+    },
+    "majority": {
+      "0.050": {
+        "threshold": 0.05,
+        "predictions_scored": 30427,
+        "precision_base": 0.0355,
+        "precision_layer": 0.0357,
+        "d_precision": 0.00013,
+        "d_precision_ci": [
+          -0.00032,
+          0.00055
+        ],
+        "recall_base": 0.1668,
+        "recall_layer": 0.1608,
+        "d_recall": -0.00602,
+        "d_recall_ci": [
+          -0.00815,
+          -0.00406
+        ],
+        "f1_base": 0.0586,
+        "f1_layer": 0.0584,
+        "d_f1": -0.00021,
+        "d_f1_ci": [
+          -0.00095,
+          0.00048
+        ],
+        "gt": 6482,
+        "TP_base": 1081,
+        "TP_layer": 1042,
+        "FP_base": 29346,
+        "FP_layer": 28182,
+        "excused_base": 1479,
+        "excused_layer": 1425,
+        "FP_cut_pct": 3.966,
+        "FP_cut_ci": [
+          3.535,
+          4.424
+        ],
+        "rejected_fp": 1162,
+        "rejected_tp": 42,
+        "rejection_precision": 0.9651,
+        "rejection_precision_ci": [
+          0.9533,
+          0.9755
+        ],
+        "impossible_pct_overall": 4.234,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 4815,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 458,
+            "judged": 15156,
+            "abstain": 1307,
+            "rate": 3.02,
+            "ci": [
+              2.44,
+              3.69
+            ]
+          },
+          "glass shatter": {
+            "events": 220,
+            "judged": 487,
+            "abstain": 19,
+            "rate": 45.17,
+            "ci": [
+              40.26,
+              50.0
+            ]
+          },
+          "lamp broken": {
+            "events": 486,
+            "judged": 1130,
+            "abstain": 373,
+            "rate": 43.01,
+            "ci": [
+              39.17,
+              46.82
+            ]
+          },
+          "scratch": {
+            "events": 93,
+            "judged": 8102,
+            "abstain": 517,
+            "rate": 1.15,
+            "ci": [
+              0.8,
+              1.54
+            ]
+          }
+        }
+      },
+      "0.100": {
+        "threshold": 0.1,
+        "predictions_scored": 9555,
+        "precision_base": 0.0833,
+        "precision_layer": 0.0842,
+        "d_precision": 0.00093,
+        "d_precision_ci": [
+          -2e-05,
+          0.00182
+        ],
+        "recall_base": 0.1228,
+        "recall_layer": 0.1202,
+        "d_recall": -0.00262,
+        "d_recall_ci": [
+          -0.00399,
+          -0.0014
+        ],
+        "f1_base": 0.0993,
+        "f1_layer": 0.099,
+        "d_f1": -0.00022,
+        "d_f1_ci": [
+          -0.00132,
+          0.00078
+        ],
+        "gt": 6482,
+        "TP_base": 796,
+        "TP_layer": 779,
+        "FP_base": 8759,
+        "FP_layer": 8469,
+        "excused_base": 458,
+        "excused_layer": 446,
+        "FP_cut_pct": 3.311,
+        "FP_cut_ci": [
+          2.789,
+          3.885
+        ],
+        "rejected_fp": 289,
+        "rejected_tp": 19,
+        "rejection_precision": 0.9383,
+        "rejection_precision_ci": [
+          0.9091,
+          0.9647
+        ],
+        "impossible_pct_overall": 3.333,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 1399,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 111,
+            "judged": 4749,
+            "abstain": 256,
+            "rate": 2.34,
+            "ci": [
+              1.64,
+              3.1
+            ]
+          },
+          "glass shatter": {
+            "events": 80,
+            "judged": 240,
+            "abstain": 6,
+            "rate": 33.33,
+            "ci": [
+              26.89,
+              39.7
+            ]
+          },
+          "lamp broken": {
+            "events": 104,
+            "judged": 474,
+            "abstain": 64,
+            "rate": 21.94,
+            "ci": [
+              17.92,
+              25.98
+            ]
+          },
+          "scratch": {
+            "events": 24,
+            "judged": 2709,
+            "abstain": 116,
+            "rate": 0.89,
+            "ci": [
+              0.49,
+              1.37
+            ]
+          }
+        }
+      },
+      "0.200": {
+        "threshold": 0.2,
+        "predictions_scored": 2987,
+        "precision_base": 0.1885,
+        "precision_layer": 0.1911,
+        "d_precision": 0.00263,
+        "d_precision_ci": [
+          0.00038,
+          0.0048
+        ],
+        "recall_base": 0.0869,
+        "recall_layer": 0.0856,
+        "d_recall": -0.00123,
+        "d_recall_ci": [
+          -0.00227,
+          -0.00043
+        ],
+        "f1_base": 0.1189,
+        "f1_layer": 0.1183,
+        "d_f1": -0.00065,
+        "d_f1_ci": [
+          -0.00203,
+          0.00047
+        ],
+        "gt": 6482,
+        "TP_base": 563,
+        "TP_layer": 555,
+        "FP_base": 2424,
+        "FP_layer": 2349,
+        "excused_base": 157,
+        "excused_layer": 151,
+        "FP_cut_pct": 3.094,
+        "FP_cut_ci": [
+          2.261,
+          4.01
+        ],
+        "rejected_fp": 74,
+        "rejected_tp": 9,
+        "rejection_precision": 0.8916,
+        "rejection_precision_ci": [
+          0.8088,
+          0.9595
+        ],
+        "impossible_pct_overall": 2.918,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 333,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 24,
+            "judged": 1480,
+            "abstain": 52,
+            "rate": 1.62,
+            "ci": [
+              0.74,
+              2.74
+            ]
+          },
+          "glass shatter": {
+            "events": 31,
+            "judged": 137,
+            "abstain": 2,
+            "rate": 22.63,
+            "ci": [
+              15.23,
+              30.33
+            ]
+          },
+          "lamp broken": {
+            "events": 29,
+            "judged": 209,
+            "abstain": 11,
+            "rate": 13.88,
+            "ci": [
+              9.09,
+              18.83
+            ]
+          },
+          "scratch": {
+            "events": 5,
+            "judged": 891,
+            "abstain": 29,
+            "rate": 0.56,
+            "ci": [
+              0.11,
+              1.25
+            ]
+          }
+        }
+      },
+      "0.300": {
+        "threshold": 0.3,
+        "predictions_scored": 1579,
+        "precision_base": 0.2761,
+        "precision_layer": 0.2812,
+        "d_precision": 0.00507,
+        "d_precision_ci": [
+          0.003,
+          0.0073
+        ],
+        "recall_base": 0.0673,
+        "recall_layer": 0.0671,
+        "d_recall": -0.00015,
+        "d_recall_ci": [
+          -0.00049,
+          0.0
+        ],
+        "f1_base": 0.1082,
+        "f1_layer": 0.1084,
+        "d_f1": 0.00018,
+        "d_f1_ci": [
+          -0.0004,
+          0.00054
+        ],
+        "gt": 6482,
+        "TP_base": 436,
+        "TP_layer": 435,
+        "FP_base": 1143,
+        "FP_layer": 1112,
+        "excused_base": 94,
+        "excused_layer": 89,
+        "FP_cut_pct": 2.712,
+        "FP_cut_ci": [
+          1.813,
+          3.713
+        ],
+        "rejected_fp": 30,
+        "rejected_tp": 2,
+        "rejection_precision": 0.9375,
+        "rejection_precision_ci": [
+          0.8378,
+          1.0
+        ],
+        "impossible_pct_overall": 2.273,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 174,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 10,
+            "judged": 782,
+            "abstain": 26,
+            "rate": 1.28,
+            "ci": [
+              0.51,
+              2.21
+            ]
+          },
+          "glass shatter": {
+            "events": 16,
+            "judged": 92,
+            "abstain": 1,
+            "rate": 17.39,
+            "ci": [
+              9.8,
+              25.56
+            ]
+          },
+          "lamp broken": {
+            "events": 8,
+            "judged": 118,
+            "abstain": 4,
+            "rate": 6.78,
+            "ci": [
+              2.68,
+              11.65
+            ]
+          },
+          "scratch": {
+            "events": 3,
+            "judged": 462,
+            "abstain": 14,
+            "rate": 0.65,
+            "ci": [
+              0.0,
+              1.49
+            ]
+          }
+        }
+      },
+      "0.400": {
+        "threshold": 0.4,
+        "predictions_scored": 1022,
+        "precision_base": 0.3376,
+        "precision_layer": 0.3447,
+        "d_precision": 0.00708,
+        "d_precision_ci": [
+          0.00433,
+          0.01035
+        ],
+        "recall_base": 0.0532,
+        "recall_layer": 0.0532,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.092,
+        "f1_layer": 0.0922,
+        "d_f1": 0.00026,
+        "d_f1_ci": [
+          0.00015,
+          0.00038
+        ],
+        "gt": 6482,
+        "TP_base": 345,
+        "TP_layer": 345,
+        "FP_base": 677,
+        "FP_layer": 656,
+        "excused_base": 56,
+        "excused_layer": 54,
+        "FP_cut_pct": 3.102,
+        "FP_cut_ci": [
+          1.914,
+          4.471
+        ],
+        "rejected_fp": 20,
+        "rejected_tp": 1,
+        "rejection_precision": 0.9524,
+        "rejection_precision_ci": [
+          0.8398,
+          1.0
+        ],
+        "impossible_pct_overall": 2.186,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 95,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 4,
+            "judged": 509,
+            "abstain": 15,
+            "rate": 0.79,
+            "ci": [
+              0.19,
+              1.65
+            ]
+          },
+          "glass shatter": {
+            "events": 13,
+            "judged": 76,
+            "abstain": 1,
+            "rate": 17.11,
+            "ci": [
+              8.86,
+              26.19
+            ]
+          },
+          "lamp broken": {
+            "events": 4,
+            "judged": 80,
+            "abstain": 3,
+            "rate": 5.0,
+            "ci": [
+              1.18,
+              10.0
+            ]
+          },
+          "scratch": {
+            "events": 2,
+            "judged": 292,
+            "abstain": 7,
+            "rate": 0.68,
+            "ci": [
+              0.0,
+              1.79
+            ]
+          }
+        }
+      },
+      "0.500": {
+        "threshold": 0.5,
+        "predictions_scored": 720,
+        "precision_base": 0.3806,
+        "precision_layer": 0.3859,
+        "d_precision": 0.00536,
+        "d_precision_ci": [
+          0.0023,
+          0.00909
+        ],
+        "recall_base": 0.0423,
+        "recall_layer": 0.0423,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.0761,
+        "f1_layer": 0.0762,
+        "d_f1": 0.00011,
+        "d_f1_ci": [
+          5e-05,
+          0.00018
+        ],
+        "gt": 6482,
+        "TP_base": 274,
+        "TP_layer": 274,
+        "FP_base": 446,
+        "FP_layer": 436,
+        "excused_base": 37,
+        "excused_layer": 35,
+        "FP_cut_pct": 2.242,
+        "FP_cut_ci": [
+          0.962,
+          3.765
+        ],
+        "rejected_fp": 10,
+        "rejected_tp": 0,
+        "rejection_precision": 1.0,
+        "rejection_precision_ci": [
+          1.0,
+          1.0
+        ],
+        "impossible_pct_overall": 1.626,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 54,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 1,
+            "judged": 383,
+            "abstain": 11,
+            "rate": 0.26,
+            "ci": [
+              0.0,
+              0.83
+            ]
+          },
+          "glass shatter": {
+            "events": 8,
+            "judged": 57,
+            "abstain": 1,
+            "rate": 14.04,
+            "ci": [
+              5.66,
+              24.0
+            ]
+          },
+          "lamp broken": {
+            "events": 2,
+            "judged": 56,
+            "abstain": 1,
+            "rate": 3.57,
+            "ci": [
+              0.0,
+              9.23
+            ]
+          },
+          "scratch": {
+            "events": 1,
+            "judged": 188,
+            "abstain": 6,
+            "rate": 0.53,
+            "ci": [
+              0.0,
+              1.76
+            ]
+          }
+        }
+      }
+    },
+    "analytics": {
+      "0.050": {
+        "threshold": 0.05,
+        "predictions_scored": 30427,
+        "precision_base": 0.0355,
+        "precision_layer": 0.0355,
+        "d_precision": -5e-05,
+        "d_precision_ci": [
+          -0.00046,
+          0.00035
+        ],
+        "recall_base": 0.1668,
+        "recall_layer": 0.1614,
+        "d_recall": -0.0054,
+        "d_recall_ci": [
+          -0.00744,
+          -0.00355
+        ],
+        "f1_base": 0.0586,
+        "f1_layer": 0.0582,
+        "d_f1": -0.00041,
+        "d_f1_ci": [
+          -0.00109,
+          0.00024
+        ],
+        "gt": 6482,
+        "TP_base": 1081,
+        "TP_layer": 1046,
+        "FP_base": 29346,
+        "FP_layer": 28437,
+        "excused_base": 1479,
+        "excused_layer": 1433,
+        "FP_cut_pct": 3.098,
+        "FP_cut_ci": [
+          2.733,
+          3.497
+        ],
+        "rejected_fp": 905,
+        "rejected_tp": 40,
+        "rejection_precision": 0.9577,
+        "rejection_precision_ci": [
+          0.9432,
+          0.9706
+        ],
+        "impossible_pct_overall": 3.328,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 4815,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 362,
+            "judged": 15187,
+            "abstain": 1276,
+            "rate": 2.38,
+            "ci": [
+              1.89,
+              2.95
+            ]
+          },
+          "glass shatter": {
+            "events": 128,
+            "judged": 488,
+            "abstain": 18,
+            "rate": 26.23,
+            "ci": [
+              21.8,
+              30.57
+            ]
+          },
+          "lamp broken": {
+            "events": 433,
+            "judged": 1135,
+            "abstain": 368,
+            "rate": 38.15,
+            "ci": [
+              34.24,
+              41.95
+            ]
+          },
+          "scratch": {
+            "events": 67,
+            "judged": 8121,
+            "abstain": 498,
+            "rate": 0.83,
+            "ci": [
+              0.53,
+              1.17
+            ]
+          }
+        }
+      },
+      "0.100": {
+        "threshold": 0.1,
+        "predictions_scored": 9555,
+        "precision_base": 0.0833,
+        "precision_layer": 0.0835,
+        "d_precision": 0.00015,
+        "d_precision_ci": [
+          -0.00072,
+          0.00097
+        ],
+        "recall_base": 0.1228,
+        "recall_layer": 0.1203,
+        "d_recall": -0.00247,
+        "d_recall_ci": [
+          -0.00379,
+          -0.00127
+        ],
+        "f1_base": 0.0993,
+        "f1_layer": 0.0986,
+        "d_f1": -0.00071,
+        "d_f1_ci": [
+          -0.00175,
+          0.00023
+        ],
+        "gt": 6482,
+        "TP_base": 796,
+        "TP_layer": 780,
+        "FP_base": 8759,
+        "FP_layer": 8566,
+        "excused_base": 458,
+        "excused_layer": 450,
+        "FP_cut_pct": 2.203,
+        "FP_cut_ci": [
+          1.786,
+          2.667
+        ],
+        "rejected_fp": 192,
+        "rejected_tp": 18,
+        "rejection_precision": 0.9143,
+        "rejection_precision_ci": [
+          0.8713,
+          0.9517
+        ],
+        "impossible_pct_overall": 2.265,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 1399,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 83,
+            "judged": 4754,
+            "abstain": 251,
+            "rate": 1.75,
+            "ci": [
+              1.16,
+              2.42
+            ]
+          },
+          "glass shatter": {
+            "events": 28,
+            "judged": 240,
+            "abstain": 6,
+            "rate": 11.67,
+            "ci": [
+              7.56,
+              16.26
+            ]
+          },
+          "lamp broken": {
+            "events": 89,
+            "judged": 475,
+            "abstain": 63,
+            "rate": 18.74,
+            "ci": [
+              14.95,
+              22.56
+            ]
+          },
+          "scratch": {
+            "events": 17,
+            "judged": 2712,
+            "abstain": 113,
+            "rate": 0.63,
+            "ci": [
+              0.28,
+              1.04
+            ]
+          }
+        }
+      },
+      "0.200": {
+        "threshold": 0.2,
+        "predictions_scored": 2987,
+        "precision_base": 0.1885,
+        "precision_layer": 0.1886,
+        "d_precision": 0.00016,
+        "d_precision_ci": [
+          -0.00192,
+          0.00203
+        ],
+        "recall_base": 0.0869,
+        "recall_layer": 0.0856,
+        "d_recall": -0.00123,
+        "d_recall_ci": [
+          -0.00227,
+          -0.00043
+        ],
+        "f1_base": 0.1189,
+        "f1_layer": 0.1178,
+        "d_f1": -0.00113,
+        "d_f1_ci": [
+          -0.0025,
+          -3e-05
+        ],
+        "gt": 6482,
+        "TP_base": 563,
+        "TP_layer": 555,
+        "FP_base": 2424,
+        "FP_layer": 2387,
+        "excused_base": 157,
+        "excused_layer": 152,
+        "FP_cut_pct": 1.526,
+        "FP_cut_ci": [
+          0.921,
+          2.236
+        ],
+        "rejected_fp": 36,
+        "rejected_tp": 9,
+        "rejection_precision": 0.8,
+        "rejection_precision_ci": [
+          0.6486,
+          0.9211
+        ],
+        "impossible_pct_overall": 1.639,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 333,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 18,
+            "judged": 1481,
+            "abstain": 51,
+            "rate": 1.22,
+            "ci": [
+              0.42,
+              2.27
+            ]
+          },
+          "glass shatter": {
+            "events": 6,
+            "judged": 137,
+            "abstain": 2,
+            "rate": 4.38,
+            "ci": [
+              0.75,
+              8.7
+            ]
+          },
+          "lamp broken": {
+            "events": 25,
+            "judged": 209,
+            "abstain": 11,
+            "rate": 11.96,
+            "ci": [
+              7.59,
+              16.67
+            ]
+          },
+          "scratch": {
+            "events": 1,
+            "judged": 891,
+            "abstain": 29,
+            "rate": 0.11,
+            "ci": [
+              0.0,
+              0.36
+            ]
+          }
+        }
+      },
+      "0.300": {
+        "threshold": 0.3,
+        "predictions_scored": 1579,
+        "precision_base": 0.2761,
+        "precision_layer": 0.2776,
+        "d_precision": 0.00148,
+        "d_precision_ci": [
+          -3e-05,
+          0.00309
+        ],
+        "recall_base": 0.0673,
+        "recall_layer": 0.0671,
+        "d_recall": -0.00015,
+        "d_recall_ci": [
+          -0.00049,
+          0.0
+        ],
+        "f1_base": 0.1082,
+        "f1_layer": 0.1081,
+        "d_f1": -9e-05,
+        "d_f1_ci": [
+          -0.00063,
+          0.00023
+        ],
+        "gt": 6482,
+        "TP_base": 436,
+        "TP_layer": 435,
+        "FP_base": 1143,
+        "FP_layer": 1132,
+        "excused_base": 94,
+        "excused_layer": 90,
+        "FP_cut_pct": 0.962,
+        "FP_cut_ci": [
+          0.422,
+          1.649
+        ],
+        "rejected_fp": 10,
+        "rejected_tp": 2,
+        "rejection_precision": 0.8333,
+        "rejection_precision_ci": [
+          0.5714,
+          1.0
+        ],
+        "impossible_pct_overall": 0.983,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 174,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 6,
+            "judged": 782,
+            "abstain": 26,
+            "rate": 0.77,
+            "ci": [
+              0.13,
+              1.59
+            ]
+          },
+          "glass shatter": {
+            "events": 2,
+            "judged": 92,
+            "abstain": 1,
+            "rate": 2.17,
+            "ci": [
+              0.0,
+              5.62
+            ]
+          },
+          "lamp broken": {
+            "events": 7,
+            "judged": 118,
+            "abstain": 4,
+            "rate": 5.93,
+            "ci": [
+              2.04,
+              10.57
+            ]
+          },
+          "scratch": {
+            "events": 1,
+            "judged": 462,
+            "abstain": 14,
+            "rate": 0.22,
+            "ci": [
+              0.0,
+              0.69
+            ]
+          }
+        }
+      },
+      "0.400": {
+        "threshold": 0.4,
+        "predictions_scored": 1022,
+        "precision_base": 0.3376,
+        "precision_layer": 0.3392,
+        "d_precision": 0.00166,
+        "d_precision_ci": [
+          0.00034,
+          0.00335
+        ],
+        "recall_base": 0.0532,
+        "recall_layer": 0.0532,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.092,
+        "f1_layer": 0.092,
+        "d_f1": 6e-05,
+        "d_f1_ci": [
+          1e-05,
+          0.00012
+        ],
+        "gt": 6482,
+        "TP_base": 345,
+        "TP_layer": 345,
+        "FP_base": 677,
+        "FP_layer": 672,
+        "excused_base": 56,
+        "excused_layer": 54,
+        "FP_cut_pct": 0.739,
+        "FP_cut_ci": [
+          0.15,
+          1.479
+        ],
+        "rejected_fp": 4,
+        "rejected_tp": 1,
+        "rejection_precision": 0.8,
+        "rejection_precision_ci": [
+          0.3333,
+          1.0
+        ],
+        "impossible_pct_overall": 0.665,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 95,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 3,
+            "judged": 509,
+            "abstain": 15,
+            "rate": 0.59,
+            "ci": [
+              0.0,
+              1.35
+            ]
+          },
+          "glass shatter": {
+            "events": 1,
+            "judged": 76,
+            "abstain": 1,
+            "rate": 1.32,
+            "ci": [
+              0.0,
+              4.5
+            ]
+          },
+          "lamp broken": {
+            "events": 3,
+            "judged": 80,
+            "abstain": 3,
+            "rate": 3.75,
+            "ci": [
+              0.0,
+              8.33
+            ]
+          },
+          "scratch": {
+            "events": 0,
+            "judged": 292,
+            "abstain": 7,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "0.500": {
+        "threshold": 0.5,
+        "predictions_scored": 720,
+        "precision_base": 0.3806,
+        "precision_layer": 0.3811,
+        "d_precision": 0.00053,
+        "d_precision_ci": [
+          0.0,
+          0.00172
+        ],
+        "recall_base": 0.0423,
+        "recall_layer": 0.0423,
+        "d_recall": 0.0,
+        "d_recall_ci": [
+          0.0,
+          0.0
+        ],
+        "f1_base": 0.0761,
+        "f1_layer": 0.0761,
+        "d_f1": 1e-05,
+        "d_f1_ci": [
+          0.0,
+          4e-05
+        ],
+        "gt": 6482,
+        "TP_base": 274,
+        "TP_layer": 274,
+        "FP_base": 446,
+        "FP_layer": 445,
+        "excused_base": 37,
+        "excused_layer": 35,
+        "FP_cut_pct": 0.224,
+        "FP_cut_ci": [
+          0.0,
+          0.719
+        ],
+        "rejected_fp": 1,
+        "rejected_tp": 0,
+        "rejection_precision": 1.0,
+        "rejection_precision_ci": [
+          1.0,
+          1.0
+        ],
+        "impossible_pct_overall": 0.407,
+        "per_class": {
+          "crack": {
+            "events": 0,
+            "judged": 54,
+            "abstain": 0,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "dent": {
+            "events": 1,
+            "judged": 383,
+            "abstain": 11,
+            "rate": 0.26,
+            "ci": [
+              0.0,
+              0.83
+            ]
+          },
+          "glass shatter": {
+            "events": 0,
+            "judged": 57,
+            "abstain": 1,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          },
+          "lamp broken": {
+            "events": 2,
+            "judged": 56,
+            "abstain": 1,
+            "rate": 3.57,
+            "ci": [
+              0.0,
+              9.23
+            ]
+          },
+          "scratch": {
+            "events": 0,
+            "judged": 188,
+            "abstain": 6,
+            "rate": 0.0,
+            "ci": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      }
+    }
+  },
+  "policies": {
+    "set": {
+      "threshold": 0.5,
+      "predictions_scored": 720,
+      "precision_base": 0.3806,
+      "precision_layer": 0.3821,
+      "d_precision": 0.00159,
+      "d_precision_ci": [
+        0.0,
+        0.00371
+      ],
+      "recall_base": 0.0423,
+      "recall_layer": 0.0423,
+      "d_recall": 0.0,
+      "d_recall_ci": [
+        0.0,
+        0.0
+      ],
+      "f1_base": 0.0761,
+      "f1_layer": 0.0761,
+      "d_f1": 3e-05,
+      "d_f1_ci": [
+        0.0,
+        7e-05
+      ],
+      "gt": 6482,
+      "TP_base": 274,
+      "TP_layer": 274,
+      "FP_base": 446,
+      "FP_layer": 443,
+      "excused_base": 37,
+      "excused_layer": 35,
+      "FP_cut_pct": 0.673,
+      "FP_cut_ci": [
+        0.0,
+        1.57
+      ],
+      "rejected_fp": 3,
+      "rejected_tp": 0,
+      "rejection_precision": 1.0,
+      "rejection_precision_ci": [
+        1.0,
+        1.0
+      ],
+      "impossible_pct_overall": 0.678,
+      "per_class": {
+        "crack": {
+          "events": 0,
+          "judged": 54,
+          "abstain": 0,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "dent": {
+          "events": 1,
+          "judged": 383,
+          "abstain": 11,
+          "rate": 0.26,
+          "ci": [
+            0.0,
+            0.83
+          ]
+        },
+        "glass shatter": {
+          "events": 0,
+          "judged": 57,
+          "abstain": 1,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "lamp broken": {
+          "events": 2,
+          "judged": 56,
+          "abstain": 1,
+          "rate": 3.57,
+          "ci": [
+            0.0,
+            9.23
+          ]
+        },
+        "scratch": {
+          "events": 2,
+          "judged": 188,
+          "abstain": 6,
+          "rate": 1.06,
+          "ci": [
+            0.0,
+            2.76
+          ]
+        }
+      }
+    },
+    "dominant": {
+      "threshold": 0.5,
+      "predictions_scored": 720,
+      "precision_base": 0.3806,
+      "precision_layer": 0.3854,
+      "d_precision": 0.00482,
+      "d_precision_ci": [
+        0.00203,
+        0.00837
+      ],
+      "recall_base": 0.0423,
+      "recall_layer": 0.0423,
+      "d_recall": 0.0,
+      "d_recall_ci": [
+        0.0,
+        0.0
+      ],
+      "f1_base": 0.0761,
+      "f1_layer": 0.0762,
+      "d_f1": 0.0001,
+      "d_f1_ci": [
+        4e-05,
+        0.00016
+      ],
+      "gt": 6482,
+      "TP_base": 274,
+      "TP_layer": 274,
+      "FP_base": 446,
+      "FP_layer": 437,
+      "excused_base": 37,
+      "excused_layer": 35,
+      "FP_cut_pct": 2.018,
+      "FP_cut_ci": [
+        0.871,
+        3.472
+      ],
+      "rejected_fp": 9,
+      "rejected_tp": 0,
+      "rejection_precision": 1.0,
+      "rejection_precision_ci": [
+        1.0,
+        1.0
+      ],
+      "impossible_pct_overall": 1.493,
+      "per_class": {
+        "crack": {
+          "events": 0,
+          "judged": 54,
+          "abstain": 0,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "dent": {
+          "events": 1,
+          "judged": 383,
+          "abstain": 11,
+          "rate": 0.26,
+          "ci": [
+            0.0,
+            0.83
+          ]
+        },
+        "glass shatter": {
+          "events": 8,
+          "judged": 57,
+          "abstain": 1,
+          "rate": 14.04,
+          "ci": [
+            5.66,
+            24.0
+          ]
+        },
+        "lamp broken": {
+          "events": 2,
+          "judged": 56,
+          "abstain": 1,
+          "rate": 3.57,
+          "ci": [
+            0.0,
+            9.23
+          ]
+        },
+        "scratch": {
+          "events": 0,
+          "judged": 187,
+          "abstain": 7,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        }
+      }
+    },
+    "majority": {
+      "threshold": 0.5,
+      "predictions_scored": 720,
+      "precision_base": 0.3806,
+      "precision_layer": 0.3859,
+      "d_precision": 0.00536,
+      "d_precision_ci": [
+        0.0023,
+        0.00909
+      ],
+      "recall_base": 0.0423,
+      "recall_layer": 0.0423,
+      "d_recall": 0.0,
+      "d_recall_ci": [
+        0.0,
+        0.0
+      ],
+      "f1_base": 0.0761,
+      "f1_layer": 0.0762,
+      "d_f1": 0.00011,
+      "d_f1_ci": [
+        5e-05,
+        0.00018
+      ],
+      "gt": 6482,
+      "TP_base": 274,
+      "TP_layer": 274,
+      "FP_base": 446,
+      "FP_layer": 436,
+      "excused_base": 37,
+      "excused_layer": 35,
+      "FP_cut_pct": 2.242,
+      "FP_cut_ci": [
+        0.962,
+        3.765
+      ],
+      "rejected_fp": 10,
+      "rejected_tp": 0,
+      "rejection_precision": 1.0,
+      "rejection_precision_ci": [
+        1.0,
+        1.0
+      ],
+      "impossible_pct_overall": 1.626,
+      "per_class": {
+        "crack": {
+          "events": 0,
+          "judged": 54,
+          "abstain": 0,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "dent": {
+          "events": 1,
+          "judged": 383,
+          "abstain": 11,
+          "rate": 0.26,
+          "ci": [
+            0.0,
+            0.83
+          ]
+        },
+        "glass shatter": {
+          "events": 8,
+          "judged": 57,
+          "abstain": 1,
+          "rate": 14.04,
+          "ci": [
+            5.66,
+            24.0
+          ]
+        },
+        "lamp broken": {
+          "events": 2,
+          "judged": 56,
+          "abstain": 1,
+          "rate": 3.57,
+          "ci": [
+            0.0,
+            9.23
+          ]
+        },
+        "scratch": {
+          "events": 1,
+          "judged": 188,
+          "abstain": 6,
+          "rate": 0.53,
+          "ci": [
+            0.0,
+            1.76
+          ]
+        }
+      }
+    },
+    "analytics": {
+      "threshold": 0.5,
+      "predictions_scored": 720,
+      "precision_base": 0.3806,
+      "precision_layer": 0.3811,
+      "d_precision": 0.00053,
+      "d_precision_ci": [
+        0.0,
+        0.00172
+      ],
+      "recall_base": 0.0423,
+      "recall_layer": 0.0423,
+      "d_recall": 0.0,
+      "d_recall_ci": [
+        0.0,
+        0.0
+      ],
+      "f1_base": 0.0761,
+      "f1_layer": 0.0761,
+      "d_f1": 1e-05,
+      "d_f1_ci": [
+        0.0,
+        4e-05
+      ],
+      "gt": 6482,
+      "TP_base": 274,
+      "TP_layer": 274,
+      "FP_base": 446,
+      "FP_layer": 445,
+      "excused_base": 37,
+      "excused_layer": 35,
+      "FP_cut_pct": 0.224,
+      "FP_cut_ci": [
+        0.0,
+        0.719
+      ],
+      "rejected_fp": 1,
+      "rejected_tp": 0,
+      "rejection_precision": 1.0,
+      "rejection_precision_ci": [
+        1.0,
+        1.0
+      ],
+      "impossible_pct_overall": 0.407,
+      "per_class": {
+        "crack": {
+          "events": 0,
+          "judged": 54,
+          "abstain": 0,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "dent": {
+          "events": 1,
+          "judged": 383,
+          "abstain": 11,
+          "rate": 0.26,
+          "ci": [
+            0.0,
+            0.83
+          ]
+        },
+        "glass shatter": {
+          "events": 0,
+          "judged": 57,
+          "abstain": 1,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        },
+        "lamp broken": {
+          "events": 2,
+          "judged": 56,
+          "abstain": 1,
+          "rate": 3.57,
+          "ci": [
+            0.0,
+            9.23
+          ]
+        },
+        "scratch": {
+          "events": 0,
+          "judged": 188,
+          "abstain": 6,
+          "rate": 0.0,
+          "ci": [
+            0.0,
+            0.0
+          ]
+        }
+      }
+    }
+  },
+  "rejected_true_positives": {
+    "policy": "majority",
+    "threshold": 0.5,
+    "n": 0,
+    "by_damage_class": {},
+    "by_dominant_part": {},
+    "counterfactual_allow_scratch_on_glass": {
+      "rejected_true_positives_after": 0,
+      "recovered": 0
+    },
+    "rows": []
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "damage_ckpt": "<path to damage_ckpt on your machine>",
+  "parts_ckpt": "<path to parts_ckpt on your machine>",
+  "images_dir": "<path to images_dir on your machine>",
+  "annotations": "<path to annotations on your machine>",
+  "data_root": "<path to data_root on your machine>",
+  "hil_parts_root": "<path to hil_parts_root on your machine>"
+}

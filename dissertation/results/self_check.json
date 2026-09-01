@@ -1,0 +1,757 @@
+[
+  {
+    "check": "A1 CarDD categories sorted == DAMAGE_CLASSES",
+    "pass": true,
+    "detail": "file=['crack', 'dent', 'glass shatter', 'lamp broken', 'scratch', 'tire flat']"
+  },
+  {
+    "check": "A2 damage class constants match list order",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "A3 PART_CLASSES has 19 entries",
+    "pass": true,
+    "detail": "n=19"
+  },
+  {
+    "check": "A4 GLASS_PARTS index glass names",
+    "pass": true,
+    "detail": "['Diggi_Back_Door_Glass', 'Front_Door_Glass', 'Front_Windshield_Glass', 'Rear_Door_Glass']"
+  },
+  {
+    "check": "A5 LAMP_PARTS index lamp names",
+    "pass": true,
+    "detail": "['Headlight', 'Taillight']"
+  },
+  {
+    "check": "A6 TYRE_PARTS index tyre",
+    "pass": true,
+    "detail": "['tyre']"
+  },
+  {
+    "check": "A7 PART_CLASSES is sorted (0-based enumeration assumption)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "A8 'Car parts dataset' holds DAMAGE labels",
+    "pass": true,
+    "detail": "titles=['Broken part', 'Corrosion', 'Dent', 'Flaking', 'Missing part', 'Paint chip']"
+  },
+  {
+    "check": "A9 'Car damages dataset' holds PART labels",
+    "pass": true,
+    "detail": "titles=['Back-bumper', 'Back-door', 'Back-wheel', 'Back-window', 'Back-windshield', 'Fender']"
+  },
+  {
+    "check": "A10 every HIL class title is mapped or ignored",
+    "pass": true,
+    "detail": "unhandled=[]"
+  },
+  {
+    "check": "B1 decoded mask area == stored COCO area",
+    "pass": true,
+    "detail": "median ratio 1.0000 over 81 instances"
+  },
+  {
+    "check": "B2 annotation image dims == actual image files",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "B3 poly_to_mask square-with-hole area",
+    "pass": true,
+    "detail": "area=105 expected 105"
+  },
+  {
+    "check": "B4 poly_to_mask rejects degenerate polygons",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "B5 HIL size field == actual image dims",
+    "pass": true,
+    "detail": "0/40 mismatched"
+  },
+  {
+    "check": "C1 empty part context abstains for every class/policy",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "C2 sub-threshold overlap abstains for set/majority",
+    "pass": true,
+    "detail": "{'set': None, 'dominant': None, 'majority': None, 'analytics': None}"
+  },
+  {
+    "check": "C2b no policy rejects on sub-threshold evidence alone",
+    "pass": true,
+    "detail": "{'set': None, 'dominant': None, 'majority': None, 'analytics': None}"
+  },
+  {
+    "check": "C2c dominant still rejects when the forbidden part clears the bar",
+    "pass": true,
+    "detail": "{'set': True, 'dominant': False, 'majority': False, 'analytics': True}"
+  },
+  {
+    "check": "C3 crack is always plausible",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "C4 glass shatter on a bumper is impossible (all policies)",
+    "pass": true,
+    "detail": "{'set': False, 'dominant': False, 'majority': False, 'analytics': False}"
+  },
+  {
+    "check": "C5 lamp 75/25 lamp+bumper: set rejects, majority accepts",
+    "pass": true,
+    "detail": "{'set': False, 'dominant': True, 'majority': True, 'analytics': True}"
+  },
+  {
+    "check": "C6 lamp 25/75 lamp+bumper: majority rejects",
+    "pass": true,
+    "detail": "{'set': False, 'dominant': False, 'majority': False, 'analytics': True}"
+  },
+  {
+    "check": "C7 scratch on door grazing glass stays plausible",
+    "pass": true,
+    "detail": "{'set': True, 'dominant': True, 'majority': True, 'analytics': True}"
+  },
+  {
+    "check": "C8 part_ok agrees with ALLOWED/EXCLUDED",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "C9 restrictiveness: crack 0, tire flat highest",
+    "pass": true,
+    "detail": "{'crack': 0.0, 'dent': 0.368, 'glass shatter': 0.789, 'lamp broken': 0.895, 'scratch': 0.211, 'tire flat': 0.947}"
+  },
+  {
+    "check": "C10 judge only ever returns True/False/None",
+    "pass": true,
+    "detail": "{None, True, False}"
+  },
+  {
+    "check": "D1 both detections match their own gt",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "D2 wrong class never matches",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "D3 IoU below threshold never matches",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "D4 a gt is claimed once, by the higher score",
+    "pass": true,
+    "detail": "{0}"
+  },
+  {
+    "check": "D5 removing the blocker frees the gt for a lower-scoring mask",
+    "pass": true,
+    "detail": "{1}"
+  },
+  {
+    "check": "D6 superclass accept-set matches either class",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "D7 empty inputs are safe",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "E1 dedup removes a same-class duplicate",
+    "pass": true,
+    "detail": "[np.int64(0)]"
+  },
+  {
+    "check": "E2 dedup never merges different classes",
+    "pass": true,
+    "detail": "[np.int64(0), np.int64(1)]"
+  },
+  {
+    "check": "E3 dedup keeps spatially distinct same-class parts",
+    "pass": true,
+    "detail": "[np.int64(0), np.int64(1)]"
+  },
+  {
+    "check": "E4 cap-then-dedup WOULD drop the real second headlight",
+    "pass": true,
+    "detail": "caps-first kept [0, 1]"
+  },
+  {
+    "check": "E5 dedup-then-cap keeps the real second headlight",
+    "pass": true,
+    "detail": "kept [np.int64(0), np.int64(2)]"
+  },
+  {
+    "check": "E6 caps respect the per-class limit",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "E7 CAP_BY_ID covers every part class",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "F1 bootstrap CI brackets the point estimate",
+    "pass": true,
+    "detail": "mean 4.9634 in [4.8648, 5.0599]"
+  },
+  {
+    "check": "F2 seeded resampling is deterministic",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "F3 Spearman rho is +1 / -1 on monotone data",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "F4 exact permutation p at rho=1, n=6 equals 2/720",
+    "pass": true,
+    "detail": "p=0.002778"
+  },
+  {
+    "check": "F5 permutation p is never below 2/n!",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "F6 pct_ci survives empty / NaN input",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 cardd/set kept == above - rejected",
+    "pass": true,
+    "detail": "608 vs 617-9"
+  },
+  {
+    "check": "G2 cardd/set TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=-5 rejTP=5 rejFP=4"
+  },
+  {
+    "check": "G3 cardd/set base precision recomputes",
+    "pass": true,
+    "detail": "0.79254 vs 0.79250"
+  },
+  {
+    "check": "G3 cardd/set layer precision recomputes",
+    "pass": true,
+    "detail": "0.79605 vs 0.79610"
+  },
+  {
+    "check": "G4 cardd/set recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 cardd/set FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 cardd/set CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00351 not in [-0.00116, 0.00926]"
+  },
+  {
+    "check": "G6 cardd/set CI brackets d_recall",
+    "pass": true,
+    "detail": "-0.00637 not in [-0.01253, -0.00128]"
+  },
+  {
+    "check": "G6 cardd/set CI brackets d_f1",
+    "pass": true,
+    "detail": "-0.00267 not in [-0.00756, 0.00154]"
+  },
+  {
+    "check": "G6 cardd/set CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "3.12500 not in [0.71900, 6.36400]"
+  },
+  {
+    "check": "G7 cardd/set per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 cardd/set per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 cardd/set rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 cardd/dominant kept == above - rejected",
+    "pass": true,
+    "detail": "608 vs 617-9"
+  },
+  {
+    "check": "G2 cardd/dominant TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=-5 rejTP=5 rejFP=4"
+  },
+  {
+    "check": "G3 cardd/dominant base precision recomputes",
+    "pass": true,
+    "detail": "0.79254 vs 0.79250"
+  },
+  {
+    "check": "G3 cardd/dominant layer precision recomputes",
+    "pass": true,
+    "detail": "0.79605 vs 0.79610"
+  },
+  {
+    "check": "G4 cardd/dominant recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 cardd/dominant FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 cardd/dominant CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00351 not in [-0.00110, 0.00921]"
+  },
+  {
+    "check": "G6 cardd/dominant CI brackets d_recall",
+    "pass": true,
+    "detail": "-0.00637 not in [-0.01263, -0.00126]"
+  },
+  {
+    "check": "G6 cardd/dominant CI brackets d_f1",
+    "pass": true,
+    "detail": "-0.00267 not in [-0.00765, 0.00159]"
+  },
+  {
+    "check": "G6 cardd/dominant CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "3.12500 not in [0.71900, 6.36400]"
+  },
+  {
+    "check": "G7 cardd/dominant per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 cardd/dominant per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 cardd/dominant rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 cardd/majority kept == above - rejected",
+    "pass": true,
+    "detail": "607 vs 617-10"
+  },
+  {
+    "check": "G2 cardd/majority TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=-6 rejTP=6 rejFP=4"
+  },
+  {
+    "check": "G3 cardd/majority base precision recomputes",
+    "pass": true,
+    "detail": "0.79254 vs 0.79250"
+  },
+  {
+    "check": "G3 cardd/majority layer precision recomputes",
+    "pass": true,
+    "detail": "0.79572 vs 0.79570"
+  },
+  {
+    "check": "G4 cardd/majority recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 cardd/majority FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 cardd/majority CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00317 not in [-0.00146, 0.00896]"
+  },
+  {
+    "check": "G6 cardd/majority CI brackets d_recall",
+    "pass": true,
+    "detail": "-0.00764 not in [-0.01423, -0.00243]"
+  },
+  {
+    "check": "G6 cardd/majority CI brackets d_f1",
+    "pass": true,
+    "detail": "-0.00361 not in [-0.00897, 0.00104]"
+  },
+  {
+    "check": "G6 cardd/majority CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "3.12500 not in [0.71900, 6.36400]"
+  },
+  {
+    "check": "G7 cardd/majority per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 cardd/majority per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 cardd/majority rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 cardd/analytics kept == above - rejected",
+    "pass": true,
+    "detail": "609 vs 617-8"
+  },
+  {
+    "check": "G2 cardd/analytics TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=-4 rejTP=4 rejFP=4"
+  },
+  {
+    "check": "G3 cardd/analytics base precision recomputes",
+    "pass": true,
+    "detail": "0.79254 vs 0.79250"
+  },
+  {
+    "check": "G3 cardd/analytics layer precision recomputes",
+    "pass": true,
+    "detail": "0.79639 vs 0.79640"
+  },
+  {
+    "check": "G4 cardd/analytics recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 cardd/analytics FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 cardd/analytics CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00384 not in [-0.00080, 0.00959]"
+  },
+  {
+    "check": "G6 cardd/analytics CI brackets d_recall",
+    "pass": true,
+    "detail": "-0.00510 not in [-0.01057, -0.00122]"
+  },
+  {
+    "check": "G6 cardd/analytics CI brackets d_f1",
+    "pass": true,
+    "detail": "-0.00174 not in [-0.00637, 0.00219]"
+  },
+  {
+    "check": "G6 cardd/analytics CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "3.12500 not in [0.71900, 6.36400]"
+  },
+  {
+    "check": "G7 cardd/analytics per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 cardd/analytics per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 cardd/analytics rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 hil/set kept == above - rejected",
+    "pass": true,
+    "detail": "717 vs 720-3"
+  },
+  {
+    "check": "G2 hil/set TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=0 rejTP=0 rejFP=3"
+  },
+  {
+    "check": "G3 hil/set base precision recomputes",
+    "pass": true,
+    "detail": "0.38056 vs 0.38060"
+  },
+  {
+    "check": "G3 hil/set layer precision recomputes",
+    "pass": true,
+    "detail": "0.38215 vs 0.38210"
+  },
+  {
+    "check": "G4 hil/set recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 hil/set FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 hil/set CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00159 not in [0.00000, 0.00371]"
+  },
+  {
+    "check": "G6 hil/set CI brackets d_recall",
+    "pass": true,
+    "detail": "0.00000 not in [0.00000, 0.00000]"
+  },
+  {
+    "check": "G6 hil/set CI brackets d_f1",
+    "pass": true,
+    "detail": "0.00003 not in [0.00000, 0.00007]"
+  },
+  {
+    "check": "G6 hil/set CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "0.67300 not in [0.00000, 1.57000]"
+  },
+  {
+    "check": "G7 hil/set per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 hil/set per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 hil/set rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 hil/dominant kept == above - rejected",
+    "pass": true,
+    "detail": "711 vs 720-9"
+  },
+  {
+    "check": "G2 hil/dominant TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=0 rejTP=0 rejFP=9"
+  },
+  {
+    "check": "G3 hil/dominant base precision recomputes",
+    "pass": true,
+    "detail": "0.38056 vs 0.38060"
+  },
+  {
+    "check": "G3 hil/dominant layer precision recomputes",
+    "pass": true,
+    "detail": "0.38537 vs 0.38540"
+  },
+  {
+    "check": "G4 hil/dominant recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 hil/dominant FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 hil/dominant CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00482 not in [0.00203, 0.00837]"
+  },
+  {
+    "check": "G6 hil/dominant CI brackets d_recall",
+    "pass": true,
+    "detail": "0.00000 not in [0.00000, 0.00000]"
+  },
+  {
+    "check": "G6 hil/dominant CI brackets d_f1",
+    "pass": true,
+    "detail": "0.00010 not in [0.00004, 0.00016]"
+  },
+  {
+    "check": "G6 hil/dominant CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "2.01800 not in [0.87100, 3.47200]"
+  },
+  {
+    "check": "G7 hil/dominant per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 hil/dominant per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 hil/dominant rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 hil/majority kept == above - rejected",
+    "pass": true,
+    "detail": "710 vs 720-10"
+  },
+  {
+    "check": "G2 hil/majority TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=0 rejTP=0 rejFP=10"
+  },
+  {
+    "check": "G3 hil/majority base precision recomputes",
+    "pass": true,
+    "detail": "0.38056 vs 0.38060"
+  },
+  {
+    "check": "G3 hil/majority layer precision recomputes",
+    "pass": true,
+    "detail": "0.38592 vs 0.38590"
+  },
+  {
+    "check": "G4 hil/majority recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 hil/majority FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 hil/majority CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00536 not in [0.00230, 0.00909]"
+  },
+  {
+    "check": "G6 hil/majority CI brackets d_recall",
+    "pass": true,
+    "detail": "0.00000 not in [0.00000, 0.00000]"
+  },
+  {
+    "check": "G6 hil/majority CI brackets d_f1",
+    "pass": true,
+    "detail": "0.00011 not in [0.00005, 0.00018]"
+  },
+  {
+    "check": "G6 hil/majority CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "2.24200 not in [0.96200, 3.76500]"
+  },
+  {
+    "check": "G7 hil/majority per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 hil/majority per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 hil/majority rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G1 hil/analytics kept == above - rejected",
+    "pass": true,
+    "detail": "719 vs 720-1"
+  },
+  {
+    "check": "G2 hil/analytics TP change is bounded by rejections",
+    "pass": true,
+    "detail": "dTP=0 rejTP=0 rejFP=1"
+  },
+  {
+    "check": "G3 hil/analytics base precision recomputes",
+    "pass": true,
+    "detail": "0.38056 vs 0.38060"
+  },
+  {
+    "check": "G3 hil/analytics layer precision recomputes",
+    "pass": true,
+    "detail": "0.38108 vs 0.38110"
+  },
+  {
+    "check": "G4 hil/analytics recall recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G5 hil/analytics FP cut % recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G6 hil/analytics CI brackets d_precision",
+    "pass": true,
+    "detail": "0.00053 not in [0.00000, 0.00172]"
+  },
+  {
+    "check": "G6 hil/analytics CI brackets d_recall",
+    "pass": true,
+    "detail": "0.00000 not in [0.00000, 0.00000]"
+  },
+  {
+    "check": "G6 hil/analytics CI brackets d_f1",
+    "pass": true,
+    "detail": "0.00001 not in [0.00000, 0.00004]"
+  },
+  {
+    "check": "G6 hil/analytics CI brackets FP_cut_pct",
+    "pass": true,
+    "detail": "0.22400 not in [0.00000, 0.71900]"
+  },
+  {
+    "check": "G7 hil/analytics per-class events sum is consistent",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G8 hil/analytics per-class rate recomputes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "check": "G9 hil/analytics rejection precision recomputes",
+    "pass": true,
+    "detail": ""
+  }
+]
