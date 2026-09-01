@@ -169,18 +169,23 @@ User Uploads Image
         ▼
 [Stage 4] Damage Validation (Spatial Filter)
   → Cross-references damage masks against part masks
-  → Enforces type-specific rules:
-      • dent       → cannot be on glass / tyre / lamp
-      • glass shatter → only valid on glass parts
-      • lamp broken   → only valid on headlight / taillight
-      • tire flat     → only valid on tyre
-      • scratch / crack → always valid
+  → First, a rule that applies to EVERY damage type:
+      • if more than 60% of the damage mask lies off every named part
+        → dropped as "mostly unknown region" (crack included)
+  → Then type-specific rules, over the parts covering >= 20% of the mask:
+      • dent          → must touch a part that is not glass / tyre / lamp
+      • glass shatter → must touch a glass part
+      • lamp broken   → must touch a lamp AND nothing else
+      • tire flat     → must touch the tyre
+      • scratch       → must touch a part, and must touch NO glass
+      • crack         → no part rule beyond the unknown-region check
   → Removes spatially impossible detections
   → Output: filtered det_damage
         │
         ▼
 [Stage 5] Analytics Engine
-  → For each damage, finds which part(s) it overlaps (≥15% fraction)
+  → For each damage, finds which part(s) it overlaps by ≥15% AND
+    are permitted for that damage type
   → Computes damage_percent = overlap_pixels / part_pixels × 100
   → Applies severity rules per damage type and percentage
   → Sums severity penalties → Health Score = max(0, 100 − Σ penalties)
@@ -286,7 +291,15 @@ Smart Merge NMS across all detections:
 
 ## Configuration Reference
 
-All settings live in `config/config.py`. No other file needs to change for deployment.
+Most settings live in `config/config.py`. Three validation and attribution
+thresholds are defined in the service files instead, because they are part of the
+filtering logic rather than deployment configuration:
+
+| Constant | Value | File |
+|---|---|---|
+| `OVERLAP_THRESHOLD` | 0.20 | `damage_validation.py` |
+| `UNKNOWN_DOMINANCE_THRESHOLD` | 0.60 | `damage_validation.py` |
+| `MIN_ATTRIBUTION_OVERLAP` | 0.15 | `damage_analytics.py` |
 
 ```python
 # ── PATHS ─────────────────────────────────────────────────────────────
@@ -511,16 +524,31 @@ Re-renders the canvas with new toggle/opacity settings **without re-running any 
 
 ## Validation Logic
 
-The `damage_validation.py` service filters detections where the damage mask spatially overlaps with an incompatible part mask:
+The `damage_validation.py` service removes damage detections that cannot
+physically sit where the parts model says they are.
 
-| Damage Type | Allowed Parts | Blocked Parts |
+**Step 1 — the unknown-region check, applied to every damage type including
+crack.** A part counts as "overlapping" only if it covers at least
+`OVERLAP_THRESHOLD` (20%) of the damage mask. If less than 40% of the mask lies
+on *any* named part — i.e. more than `UNKNOWN_DOMINANCE_THRESHOLD` (60%) of it is
+on unsegmented background — the detection is dropped outright. This check runs
+before any type-specific rule, so it can discard a damage of any class.
+
+**Step 2 — the type-specific rule.** Note that these are *not* symmetric: only
+`lamp broken` is exclusive, meaning it is the only rule that rejects a detection
+for *also* touching something else.
+
+| Damage Type | Rule as implemented | Exclusive? |
 |---|---|---|
-| dent | All body panels | Glass parts, tyre, headlight, taillight |
-| glass shatter | Glass parts only | All other parts |
-| lamp broken | Headlight, Taillight only | All other parts |
-| tire flat | tyre only | All other parts |
-| scratch | All body panels | Glass parts |
-| crack | Any named part | — |
+| dent | must touch at least one part that is not glass, tyre, headlight or taillight | no |
+| glass shatter | must touch at least one glass part | no — may also overlap other parts |
+| lamp broken | must touch a lamp part **and nothing else** | **yes** |
+| tire flat | must touch the tyre | no — may also overlap other parts |
+| scratch | must touch a named part, and must touch **no** glass part | no |
+| crack | no type rule; only the Step 1 check applies | — |
+
+Glass parts are the six `*_Glass` classes; lamp parts are the four
+`Left_/Right_Headlight` and `Left_/Right_Taillight` classes.
 
 ---
 
@@ -539,9 +567,16 @@ Severity is determined by:
   damage_percent = (overlap_pixels / part_mask_pixels) × 100
   → looked up in per-damage-type severity threshold table
 
-Unmatched external damage (no overlapping part found) contributes
-  penalty = 0  (severity = None, shown as "—" in table)
-  unless damage pixel count ≥ MIN_EXTERNAL_PIXELS (default: 150)
+Unmatched external damage — damage for which no part was credited, meaning no
+part both covered at least MIN_ATTRIBUTION_OVERLAP (15%) of the damage mask *and*
+was permitted for that damage type — is handled as follows:
+
+  below MIN_EXTERNAL_PIXELS (150 px)  → discarded; it does not appear at all
+  at or above 150 px                  → listed as an "Unknown_External" row
+                                        with severity "—" and penalty 0
+
+Either way it never affects the health score: with no reference part area there
+is no meaningful percentage, so no severity is assigned and no penalty applies.
 ```
 
 **Example:**
@@ -568,7 +603,7 @@ Download pre-trained model checkpoints (`checkpoint_best_total.pth`) and the cor
 | Folder | Dataset | Description |
 |--------|---------|-------------|
 | `evaluation/Car Damage/` | [CarDD](https://cardd-ustc.github.io/) | 374 test images · 785 annotations · 6 damage classes |
-| `evaluation/Car Parts/` | Multiple public datasets (combined) | 540 test images · 4,591 annotations · 19 part classes |
+| `evaluation/Car Parts/` | [Eight public datasets, combined](#acknowledgements) | 540 test images · 4,591 annotations · 19 part classes |
 
 Both models were **trained** on images resized to 1152 × 1152, but **evaluation does not repeat that resize**. RF-DETR interpolates its mask logits to the size of the image it is handed and thresholds them there, so feeding the original image returns masks already in original coordinates — no re-projection, and nothing lost at the mask boundary.
 
@@ -578,11 +613,60 @@ Each sub-directory has its own `README.md` with full metric tables, per-category
 
 ## User Interface
 
-![App UI](https://github.com/Tarpit59/car-damage-and-parts-segmentation/blob/main/base/static/UI_Image/UI_Screenshot.png)
+![App UI](base/static/UI_Image/UI_Screenshot.png)
 
 
 ## Acknowledgements
 
- - [RF-DETR Segmentation](https://blog.roboflow.com/train-rf-detr-segmentation)
- - [RF-DETR Segmentation Training](https://github.com/roboflow/notebooks/blob/main/notebooks/how-to-finetune-rf-detr-on-segmentation-dataset.ipynb)
- - [CarDD Dataset](https://cardd-ustc.github.io/)
+### Damage dataset — CarDD
+
+> X. Wang, W. Li and Z. Wu, "CarDD: A New Dataset for Vision-Based Car Damage
+> Detection," *IEEE Transactions on Intelligent Transportation Systems*,
+> vol. 24, no. 7, pp. 7202-7214, July 2023, doi: 10.1109/TITS.2023.3258480.
+> Project page: <https://cardd-ustc.github.io/>
+
+### Parts dataset — eight public sources, combined
+
+No single public dataset covers every part class this pipeline needs, so the
+parts model was trained on a composite of **eight** public car-part segmentation
+datasets — 11,547 images pooled, 7,708 retained after de-duplication and
+remapping onto a unified 19-class taxonomy.
+
+| # | dataset | platform | images | classes | licence |
+|---|---|---|---:|---:|---|
+| 1 | Car Parts Dataset (DSMLR, IT-KMITL) | GitHub | 500 | 18 | citation requested |
+| 2 | Car parts - *Segmentation* | Roboflow Universe | 1,755 | 9 | CC BY 4.0 |
+| 3 | Car Parts Segmentation - *Person Detector* | Roboflow Universe | 603 | 19 | CC BY 4.0 |
+| 4 | Car parts - *FleetBlox* | Roboflow Universe | 1,862 | 33 | CC BY 4.0 |
+| 5 | car-parts - *Axion Technical Service* | Roboflow Universe | 819 | 30 | CC BY 4.0 |
+| 6 | car parts - *Habibullah* | Roboflow Universe | 2,866 | 16 | CC BY 4.0 |
+| 7 | car-seg - *Gianmarco Russo* | Roboflow Universe | 2,255 | 21 | CC BY 4.0 |
+| 8 | car-parts - *Atheer Algarni* | Roboflow Universe | 887 | 20 | CC BY 4.0 |
+
+The DSMLR dataset sets no formal licence but requests citation of its paper:
+
+> K. Pasupa, P. Kittiworapanya, N. Hongngern and K. Woraratpanya, "Evaluation of
+> deep learning algorithms for semantic segmentation of car parts," *Complex &
+> Intelligent Systems*, 2021, pp. 1-13, doi: 10.1007/s40747-021-00397-8.
+> Dataset: <https://github.com/dsmlr/Car-Parts-Segmentation>
+
+The seven Roboflow Universe datasets, in table order:
+[2](https://universe.roboflow.com/segmentation-9q8ob/car-parts-llqro) ·
+[3](https://universe.roboflow.com/person-detector/car-parts-segmentation) ·
+[4](https://universe.roboflow.com/fleetblox-car-damage/car-parts-bzaux) ·
+[5](https://universe.roboflow.com/axion-technical-service-pvt-ltd/car-parts-xal6u) ·
+[6](https://universe.roboflow.com/habibullah-hmpb8/car-parts-chf9t) ·
+[7](https://universe.roboflow.com/gianmarco-russo-vt9xr/car-seg-un1pm) ·
+[8](https://universe.roboflow.com/atheer-algarni-gvico/car-parts-ypa1r)
+
+### Models and tools
+
+- **RF-DETR** (Roboflow, Apache-2.0) — both segmentation models.
+  > I. Robinson, P. Robicheaux, M. Popov, D. Ramanan and N. Peri, "RF-DETR:
+  > Neural Architecture Search for Real-Time Detection Transformers,"
+  > arXiv:2511.09554, 2025. <https://github.com/roboflow/rf-detr>
+- **YOLOv8** (Ultralytics, AGPL-3.0) — vehicle localisation.
+  > G. Jocher, A. Chaurasia and J. Qiu, "Ultralytics YOLOv8," 2023.
+  > <https://github.com/ultralytics/ultralytics>
+- [RF-DETR segmentation guide](https://blog.roboflow.com/train-rf-detr-segmentation)
+  and [fine-tuning notebook](https://github.com/roboflow/notebooks/blob/main/notebooks/how-to-finetune-rf-detr-on-segmentation-dataset.ipynb)
