@@ -7,6 +7,12 @@ supervision==0.27.0
 werkzeug>=3.0.0
 rfdetr==1.6.1
 
+# Evaluation scripts only (evaluation/**). Not needed to run the web app.
+pycocotools>=2.0.7
+matplotlib>=3.8.0
+pandas>=2.1.0
+tqdm>=4.66.0
+
 --extra-index-url https://download.pytorch.org/whl/cu128
 
 torch==2.8.0

@@ -115,8 +115,7 @@ car-damage-and-parts-segmentation/
 │           ├── damage_validation.py        ← Stage 4: Spatial false-positive filter
 │           ├── damage_analytics.py         ← Stage 5: Health score + per-part severity report
 │           ├── output_handler.py           ← Pipeline orchestrator (calls stages 1–5)
-│           ├── coco_annotations.py         ← Optional COCO JSON export
-│           └── damage_analytics.py         ← Analytics engine
+│           └── coco_annotations.py         ← Optional COCO JSON export
 └── evaluation/
     ├── README.md                               ← Top-level evaluation overview
     ├── Car Damage/
@@ -325,7 +324,27 @@ TOUCH_GAP_PIXELS        = 3    # Masks within 3px are treated as touching
 # ── ANALYTICS ─────────────────────────────────────────────────────────
 MIN_EXTERNAL_PIXELS = 150  # Min damage pixels for "unknown" (unmatched) damage
 PADDING_RATIO       = 0.02 # 2% padding added around YOLO car bounding box
+SEVERITY_RULES      = {...}  # Per-damage-type percentage bands (table below)
+SEVERITY_PENALTY    = {...}  # Points deducted per severity level
+
+# ── FLASK ───────────────────────────────────────────────────────────────────
+SECRET_KEY = "..."         # Session signing key - change before deploying
+DEBUG      = True          # Development only; see the warning below
+HOST       = "0.0.0.0"
+PORT       = 5000
+
+# ── MISC ────────────────────────────────────────────────────────────────────
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+TILE_DAMAGE_NAMES  = {"dent", "scratch", "crack"}  # Kept from the tile pass
+SAVE_COCO_DEFAULT  = False  # Write a COCO JSON alongside each analysis
 ```
+
+> **Warning — development defaults.** The repository ships `DEBUG = True` with
+> `HOST = "0.0.0.0"`. Flask's debugger allows arbitrary code execution through
+> the browser, and `0.0.0.0` binds every network interface, so running as-is
+> exposes a shell to anyone who can reach the port. Set `DEBUG = False` and
+> replace the hard-coded `SECRET_KEY` before running this anywhere but your
+> own machine.
 
 ---
 
@@ -383,11 +402,11 @@ all Left_* and Right_* classes + `Diggi_Back_Door_Glass` + `Front_Windshield_Gla
 
 | Damage Type | Minor | Moderate | Major | Critical |
 |---|---|---|---|---|
-| scratch | < 1.5% | < 4% | < 8% | ≥ 8% |
-| dent | < 2% | < 5% | < 10% | ≥ 10% |
-| crack | < 1% | < 3% | < 6% | ≥ 6% |
-| glass shatter | — | — | < 5% | ≥ 5% |
-| lamp broken | — | — | < 5% | ≥ 5% |
+| scratch | ≤ 1.5% | ≤ 4% | ≤ 8% | > 8% |
+| dent | ≤ 2% | ≤ 5% | ≤ 10% | > 10% |
+| crack | ≤ 1% | ≤ 3% | ≤ 6% | > 6% |
+| glass shatter | — | — | ≤ 5% | > 5% |
+| lamp broken | — | — | ≤ 5% | > 5% |
 | tire flat | — | — | — | Always |
 
 ### Severity Penalty Points
@@ -527,10 +546,10 @@ Unmatched external damage (no overlapping part found) contributes
 
 **Example:**
 - Left_Fender → scratch → 3.2% → Moderate → −6
-- Hood_Bonnet → dent → 6.1% → Moderate → −6
-- Left_Headlight → lamp broken → 7.3% → Major → −10
+- Hood_Bonnet → dent → 6.1% → Major → −10
+- Left_Headlight → lamp broken → 7.3% → Critical → −15
 
-Health Score = 100 − 6 − 6 − 10 = **78**
+Health Score = 100 − 6 − 10 − 15 = **69**
 
 ---
 
@@ -548,8 +567,10 @@ Download pre-trained model checkpoints (`checkpoint_best_total.pth`) and the cor
 
 | Folder | Dataset | Description |
 |--------|---------|-------------|
-| `evaluation/Car Damage/` | [CarDD](https://cardd-ustc.github.io/) | 374 test images · 785 annotations · 6 damage classes · images resized to **1152 × 1152** |
-| `evaluation/Car Parts/` | Multiple public datasets (combined) | 540 test images · 4,591 annotations · 19 part classes · images resized to **1152 × 1152** |
+| `evaluation/Car Damage/` | [CarDD](https://cardd-ustc.github.io/) | 374 test images · 785 annotations · 6 damage classes |
+| `evaluation/Car Parts/` | Multiple public datasets (combined) | 540 test images · 4,591 annotations · 19 part classes |
+
+Both models were **trained** on images resized to 1152 × 1152, but **evaluation does not repeat that resize**. RF-DETR interpolates its mask logits to the size of the image it is handed and thresholds them there, so feeding the original image returns masks already in original coordinates — no re-projection, and nothing lost at the mask boundary.
 
 Each sub-directory has its own `README.md` with full metric tables, per-category AP breakdowns, usage instructions for the evaluation scripts, and training/validation charts.
 
