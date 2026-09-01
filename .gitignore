@@ -57,8 +57,11 @@ with_tile_inference/
 .agent/
 Report/
 cd_history/
-# next-semester work, kept locally and not published yet
-dp2_*
+# scratch area for work in progress
+local/
 
 # machine-specific dataset and checkpoint locations
 local_paths.json
+
+# experiment scaffold - kept locally, not published
+research/
