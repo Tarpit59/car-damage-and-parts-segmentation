@@ -253,22 +253,35 @@ more often than the loosely constrained ones, and the pattern **replicates acros
 two independent datasets**. `crack`, which carries no rule, records exactly zero
 on both — the harness is doing nothing it was not asked to do.
 
-### The relationship, stated honestly
+### What bounds the gain
 
-Ranking the six CarDD classes by *rule restrictiveness* (the fraction of the 19
-part classes each damage class is forbidden from) against their impossibility rate
-gives Spearman **ρ = 0.8286, exact p = 0.0583**.
+Ranking the six CarDD classes by *rule restrictiveness* — the fraction of the 19
+part classes each damage class is forbidden from — against their *per-class AP*
+gives Spearman **ρ = +0.8286, exact p = 0.0583**. (This is the correlation the
+run reports as `rho(restrictiveness, AP)`; restrictiveness against the
+impossibility rates in the table above is a different pair, and a weaker one at
+ρ = 0.7714.)
 
-This does **not** reach significance, and the reason is arithmetic rather than
-evidential: with n = 6 classes the smallest two-sided p an exact permutation test
-can return is 2/6! = **0.0028**, and the observed ordering is one rank-swap from
-perfect. A p above 0.05 here means these six points cannot certify the
-relationship — not that there is none. Restrictiveness is also confounded with
-class distinctiveness (glass shatter and tire flat are both highly constrained
-*and* easy classes, at AP 94.7 and 93.5). The per-class rates above, whose
-confidence intervals are separated by a wide margin and which replicate on a
-second dataset, carry the weight; the correlation is reported as description, not
-as inference.
+The positive sign is the finding, and it is an unwelcome one: **the rules are
+most restrictive on the classes the detector already handles best.** Glass
+shatter, lamp broken and tire flat are forbidden from 79%, 89% and 95% of the
+part taxonomy respectively, and they are also the three classes the damage model
+already scores highest on — 94.7, 75.6 and 93.5 AP. The classes where the
+detector is weak, `crack` at 22.4 and `scratch` at 34.0, are the ones anatomy
+barely constrains, because cracks and scratches genuinely can occur almost
+anywhere on a car. The layer therefore has least authority exactly where the
+detector needs the most help, and that — rather than any deficiency in the rules
+— is what caps the aggregate gain.
+
+The figure is reported as description, not as inference. With n = 6 classes the
+smallest two-sided p an exact permutation test can return is 2/6! = **0.0028**,
+and the observed ordering is one rank-swap from perfect, so a p of 0.0583 means
+these six points cannot certify the relationship — not that there is none.
+Restrictiveness and AP may also both be driven by the same underlying property,
+namely how physically and visually distinctive a damage type is, and nothing in
+six points can separate that from a causal reading. The per-class impossibility
+rates above, whose confidence intervals are separated by a wide margin and which
+replicate on a second dataset, carry the empirical weight.
 
 ---
 
